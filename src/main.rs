@@ -95,6 +95,7 @@ fn load_storage_config() -> Result<StorageConfig> {
         StorageProvider::Oss => load_oss_config(),
         StorageProvider::S3 => load_s3_config(&provider_str),
         StorageProvider::Fs => load_fs_config(),
+        StorageProvider::Minio => load_minio_config(),
     }
 }
 
@@ -208,6 +209,32 @@ fn load_s3_config(provider_str: &str) -> Result<StorageConfig> {
         ))
     }
 
+}
+
+fn load_minio_config() -> Result<StorageConfig> {
+    let bucket = env::var("STORAGE_BUCKET")
+        .or_else(|_| env::var("MINIO_BUCKET"))
+        .map_err(|_| anyhow::anyhow!("STORAGE_BUCKET or MINIO_BUCKET environment variable is required"))?;
+
+    let access_key_id = env::var("STORAGE_ACCESS_KEY_ID")
+        .or_else(|_| env::var("MINIO_ACCESS_KEY"))
+        .map_err(|_| anyhow::anyhow!("STORAGE_ACCESS_KEY_ID or MINIO_ACCESS_KEY environment variable is required"))?;
+
+    let secret_access_key = env::var("STORAGE_ACCESS_KEY_SECRET")
+        .or_else(|_| env::var("MINIO_SECRET_KEY"))
+        .map_err(|_| anyhow::anyhow!("STORAGE_ACCESS_KEY_SECRET or MINIO_SECRET_KEY environment variable is required"))?;
+
+    let region = env::var("STORAGE_REGION")
+        .or_else(|_| env::var("MINIO_DEFAULT_REGION"))
+        .ok();
+
+    let endpoint = env::var("STORAGE_ENDPOINT")
+        .or_else(|_| env::var("MINIO_ENDPOINT"))
+        .unwrap_or_else(|_| "http://localhost:9000".to_string());
+
+    let mut config = StorageConfig::minio(bucket, access_key_id, secret_access_key, region);
+    config.endpoint = Some(endpoint);
+    Ok(config)
 }
 
 /// Load filesystem configuration (for testing)
