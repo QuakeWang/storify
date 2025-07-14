@@ -4,6 +4,7 @@ use std::fmt;
 use std::path::Path;
 use std::str::FromStr;
 use tokio::fs;
+use std::ffi::OsStr;
 
 /// Storage provider types
 #[derive(Debug, Clone)]
@@ -304,6 +305,76 @@ impl StorageClient {
     pub fn provider(&self) -> &StorageProvider {
         &self.provider
     }
+
+    /// Upload files/directories to remote storage
+    pub async fn upload_files(&self, local_path: &str, remote_path: &str, is_recursive: bool) -> Result<()> {
+        // check local path validity
+        let path = Path::new(local_path);
+        if !path.exists() {
+            return Err(anyhow::anyhow!("Local path cannot exits"));
+        }
+
+        // check remote path validity
+        let remote_path_exist = self.operator.exists(remote_path).await?;
+        if !remote_path_exist {
+            return Err(anyhow::anyhow!("Remote path cannot exits"));
+        }
+
+        match () {
+            _ if path.is_file() && !is_recursive => {
+                let file_name = path.file_name().unwrap_or(OsStr::new(local_path));
+                let remote_file_path = Path::new(remote_path).join(&file_name).to_string_lossy().to_string();
+                let data = fs::read(&local_path).await?;
+                self.operator.write(&remote_file_path, data).await?;
+                println!(
+                    "Upload: {} → {}",
+                    path.display(),
+                    remote_file_path
+                );
+            }
+            _ if path.is_dir() && is_recursive => {
+                self.upload_recursive(local_path, remote_path).await?;
+            }
+            _ => {
+                return Err(anyhow::anyhow!("Local path is illegal"));
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn upload_recursive(&self, local_path: &str, remote_path: &str) -> Result<()> {
+        let local_path_type = Path::new(local_path);
+        let relative_path = local_path_type.file_name().unwrap_or(OsStr::new(local_path));
+        let mut entries = fs::read_dir(local_path).await?;
+
+        while let Some(entry) = entries.next_entry().await? {
+            let local_file_path = entry.path();
+            let loca_recursive_path = local_file_path.
+                to_string_lossy().to_string();
+            let file_name = local_file_path.
+                file_name().unwrap_or(OsStr::new(local_file_path.as_os_str()));
+            let remote_file_path = Path::new(remote_path)
+                .join(relative_path)
+                .join(file_name)
+                .to_string_lossy()
+                .to_string();
+
+            if local_file_path.is_dir() {
+                Box::pin(self.upload_recursive(&loca_recursive_path, &remote_file_path)).await?;
+            } else {
+                let data = fs::read(&local_file_path).await?;
+                self.operator.write(&remote_file_path, data).await?;
+                println!(
+                    "Upload: {} → {}",
+                    local_file_path.display(),
+                    remote_file_path,
+                );
+            }
+        }
+        Ok(())
+    }
+    
 }
 
 /// File information for display
