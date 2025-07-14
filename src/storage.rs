@@ -14,8 +14,6 @@ pub enum StorageProvider {
     S3,
     /// Local filesystem (for testing)
     Fs,
-    /// Minio
-    Minio,
 }
 
 impl FromStr for StorageProvider {
@@ -24,9 +22,8 @@ impl FromStr for StorageProvider {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "oss" => Ok(Self::Oss),
-            "s3" => Ok(Self::S3),
+            "s3" | "minio" => Ok(Self::S3),
             "fs" => Ok(Self::Fs),
-            "minio" => Ok(Self::Minio),
             _ => Err(anyhow::anyhow!("Unsupported storage provider: {}", s)),
         }
     }
@@ -88,24 +85,6 @@ impl StorageConfig {
         }
     }
 
-    /// Create Minio configuration
-    pub fn minio(
-        bucket: String,
-        access_key_id: String,
-        secret_access_key: String,
-        region: Option<String>,
-    ) -> Self {
-        Self {
-            provider: StorageProvider::Minio,
-            bucket,
-            access_key_id: Some(access_key_id),
-            access_key_secret: Some(secret_access_key),
-            endpoint: None,
-            region,
-            root_path: None,
-        }
-    }
-
     /// Create filesystem configuration for testing
     pub fn fs(root_path: String) -> Self {
         Self {
@@ -156,24 +135,6 @@ impl StorageClient {
                 Ok(Operator::new(builder)?.finish())
             }
             StorageProvider::S3 => {
-                let mut builder = opendal::services::S3::default().bucket(&config.bucket);
-
-                if let Some(access_key_id) = &config.access_key_id {
-                    builder = builder.access_key_id(access_key_id);
-                }
-                if let Some(secret_access_key) = &config.access_key_secret {
-                    builder = builder.secret_access_key(secret_access_key);
-                }
-                if let Some(region) = &config.region {
-                    builder = builder.region(region);
-                }
-                if let Some(endpoint) = &config.endpoint {
-                    builder = builder.endpoint(endpoint);
-                }
-
-                Ok(Operator::new(builder)?.finish())
-            }
-            StorageProvider::Minio => {
                 let mut builder = opendal::services::S3::default().bucket(&config.bucket);
 
                 if let Some(access_key_id) = &config.access_key_id {
