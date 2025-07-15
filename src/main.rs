@@ -177,28 +177,21 @@ fn load_s3_config(provider_str: &str) -> Result<StorageConfig> {
         .ok()
     };
 
-    match provider_str.to_lowercase().as_str() {
-        "s3" => {
-            Ok(StorageConfig::s3(
-                bucket,
-                access_key_id,
-                secret_access_key,
-                region,
-            ))
-        }
-        "minio" => {
-            let endpoint = env::var("STORAGE_ENDPOINT")
-                .or_else(|_| env::var("MINIO_ENDPOINT"))
-                .unwrap_or_else(|_| "http://localhost:9000".to_string());
+    if is_minio {
+        let endpoint = env::var("STORAGE_ENDPOINT")
+            .or_else(|_| env::var("MINIO_ENDPOINT"))
+            .unwrap_or_else(|_| "http://localhost:9000".to_string());
 
-            let mut config = StorageConfig::s3(bucket, access_key_id, secret_access_key, region,);
-            config.endpoint = Some(endpoint);
-            Ok(config)
-            
-        }
-        _ => {
-            return Err(anyhow::anyhow!("Unsupported storage provider: {}", provider_str));
-        }
+        let mut config = StorageConfig::s3(bucket, access_key_id, secret_access_key, region,);
+        config.endpoint = Some(endpoint);
+        Ok(config)
+    } else {
+        Ok(StorageConfig::s3(
+            bucket,
+            access_key_id,
+            secret_access_key,
+            region,
+        ))
     }
 
 }
