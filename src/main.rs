@@ -133,13 +133,21 @@ fn load_oss_config() -> Result<StorageConfig> {
 
 /// Load S3 (AWS) configuration
 fn load_s3_config(provider_str: &str) -> Result<StorageConfig> {
+    let is_minio = provider_str.to_lowercase() == "minio";
 
-    let bucket = env::var("STORAGE_BUCKET")
-        .or_else(|_| env::var("AWS_S3_BUCKET"))
+    let bucket = if is_minio {
+        env::var("STORAGE_BUCKET")
         .or_else(|_| env::var("MINIO_BUCKET"))
         .map_err(|_| {
-            anyhow::anyhow!("STORAGE_BUCKET or AWS_S3_BUCKET or MINIO_BUCKET environment variable is required")
-        })?;
+            anyhow::anyhow!("STORAGE_BUCKET or MINIO_BUCKET environment variable is required")
+        })?
+    } else {
+        env::var("STORAGE_BUCKET")
+        .or_else(|_| env::var("AWS_S3_BUCKET"))
+        .map_err(|_| {
+            anyhow::anyhow!("STORAGE_BUCKET or AWS_S3_BUCKET environment variable is required")
+        })?
+    };
 
     let access_key_id = if is_minio {
         env::var("STORAGE_ACCESS_KEY_ID")
@@ -150,12 +158,10 @@ fn load_s3_config(provider_str: &str) -> Result<StorageConfig> {
     } else {
         env::var("STORAGE_ACCESS_KEY_ID")
         .or_else(|_| env::var("AWS_ACCESS_KEY_ID"))
-        .or_else(|_| env::var("MINIO_ACCESS_KEY"))
         .map_err(|_| {
-            anyhow::anyhow!(
-                "STORAGE_ACCESS_KEY_ID or AWS_ACCESS_KEY_ID or MINIO_ACCESS_KEY environment variable is required"
-            )
-        })?;
+            anyhow::anyhow!("STORAGE_ACCESS_KEY_ID or AWS_ACCESS_KEY_ID environment variable is required")
+        })?
+    };
 
     let secret_access_key = if is_minio {
         env::var("STORAGE_ACCESS_KEY_SECRET")
@@ -166,8 +172,10 @@ fn load_s3_config(provider_str: &str) -> Result<StorageConfig> {
     } else {
         env::var("STORAGE_ACCESS_KEY_SECRET")
         .or_else(|_| env::var("AWS_SECRET_ACCESS_KEY"))
-        .or_else(|_| env::var("MINIO_SECRET_KEY"))
-        .map_err(|_| anyhow::anyhow!("STORAGE_ACCESS_KEY_SECRET or AWS_SECRET_ACCESS_KEY or MINIO_SECRET_KEY environment variable is required"))?;
+        .map_err(|_| {
+            anyhow::anyhow!("STORAGE_ACCESS_KEY_SECRET or AWS_SECRET_ACCESS_KEY environment variable is required")
+        })?
+    };
 
     let region = if is_minio {
         env::var("STORAGE_REGION")
@@ -176,8 +184,8 @@ fn load_s3_config(provider_str: &str) -> Result<StorageConfig> {
     } else {
         env::var("STORAGE_REGION")
         .or_else(|_| env::var("AWS_DEFAULT_REGION"))
-        .or_else(|_| env::var("MINIO_DEFAULT_REGION"))
-        .ok();
+        .ok()
+    };
 
     match provider_str.to_lowercase().as_str() {
         "s3" => {
