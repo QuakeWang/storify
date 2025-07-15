@@ -177,13 +177,17 @@ fn load_s3_config(provider_str: &str) -> Result<StorageConfig> {
         .ok()
     };
 
-    if is_minio {
-        let endpoint = env::var("STORAGE_ENDPOINT")
+    let endpoint = if is_minio {
+        Some(env::var("STORAGE_ENDPOINT")
             .or_else(|_| env::var("MINIO_ENDPOINT"))
-            .unwrap_or_else(|_| "http://localhost:9000".to_string());
+            .unwrap_or_else(|_| "http://localhost:9000".to_string()),)
+    } else {
+        env::var("STORAGE_ENDPOINT").ok()
+    };
 
+    if is_minio {
         let mut config = StorageConfig::s3(bucket, access_key_id, secret_access_key, region,);
-        config.endpoint = Some(endpoint);
+        config.endpoint = endpoint;
         Ok(config)
     } else {
         Ok(StorageConfig::s3(
