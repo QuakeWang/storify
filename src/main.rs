@@ -37,6 +37,10 @@ struct Args {
     /// Show summary only (for du command)
     #[arg(short = 's', long = "summary")]
     summary: bool,
+
+    /// Upload files from local to remote
+    #[arg(short = 'p', long = "put", num_args = 2, value_names = ["LOCAL", "REMOTE"])]
+    put: Option<Vec<String>>,
 }
 
 #[tokio::main]
@@ -66,6 +70,12 @@ async fn main() -> Result<()> {
             let path = args.du.unwrap();
             validate_path(&path)?;
             client.disk_usage(&path, args.summary).await?;
+        }
+        _ if args.put.is_some() => {
+            let paths = args.put.unwrap();
+            validate_path(&paths[0])?;
+            validate_path(&paths[1])?;
+            client.upload_files(&paths[0], &paths[1], args.recursive).await?;
         }
         _ => {
             eprintln!("Error: No command specified. Use --help for usage information.");
