@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use opendal::{EntryMode, Operator};
 use std::path::Path;
 use std::str::FromStr;
@@ -354,10 +354,10 @@ impl StorageClient {
 
         while let Some(entry) = entries.next_entry().await? {
             let local_file_path = entry.path();
-            let loca_recursive_path = local_file_path.
-                to_string_lossy().to_string();
-            let file_name = local_file_path.
-                file_name().unwrap_or(OsStr::new(local_file_path.as_os_str()));
+            let loca_recursive_path = local_file_path.to_string_lossy().to_string();
+            let file_name = local_file_path
+                .file_name()
+                .unwrap_or(OsStr::new(local_file_path.as_os_str()));
             let remote_file_path = Path::new(remote_path)
                 .join(relative_path)
                 .join(file_name)
