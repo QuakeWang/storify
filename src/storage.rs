@@ -1,10 +1,11 @@
 use anyhow::Result;
 use opendal::{EntryMode, Operator};
-use std::fmt;
 use std::path::Path;
 use std::str::FromStr;
+use std::{ffi::OsStr, fmt, path::PathBuf};
 use tokio::fs;
-use std::ffi::OsStr;
+use tokio::fs::File;
+use tokio::io::{AsyncReadExt, BufReader};
 
 /// Storage provider types
 #[derive(Debug, Clone)]
@@ -181,7 +182,7 @@ impl StorageClient {
         if summary {
             let (total_size, total_files) = self.calculate_total_usage(path).await?;
             println!("{} {}", format_size(total_size), path);
-            println!("Total files: {}", total_files);
+            println!("Total files: {total_files}");
         } else {
             self.show_detailed_usage(path).await?;
         }
@@ -220,7 +221,7 @@ impl StorageClient {
     fn print_entry(&self, entry: &opendal::Entry, long: bool) {
         if long {
             let file_info = FileInfo::from_entry(entry);
-            println!("{}", file_info);
+            println!("{file_info}");
         } else {
             println!("{}", entry.path());
         }
@@ -307,7 +308,12 @@ impl StorageClient {
     }
 
     /// Upload files/directories to remote storage
-    pub async fn upload_files(&self, local_path: &str, remote_path: &str, is_recursive: bool) -> Result<()> {
+    pub async fn upload_files(
+        &self,
+        local_path: &str,
+        remote_path: &str,
+        is_recursive: bool,
+    ) -> Result<()> {
         // check local path validity
         let path = Path::new(local_path);
         if !path.exists() {
@@ -317,36 +323,34 @@ impl StorageClient {
         // check remote path validity
         let remote_path_exist = self.operator.exists(remote_path).await?;
         if !remote_path_exist {
-            return Err(anyhow::anyhow!("Remote path cannot exits"));
-        }
-
-        match () {
-            _ if path.is_file() && !is_recursive => {
-                let file_name = path.file_name().unwrap_or(OsStr::new(local_path));
-                let remote_file_path = Path::new(remote_path).join(&file_name).to_string_lossy().to_string();
-                let data = fs::read(&local_path).await?;
-                self.operator.write(&remote_file_path, data).await?;
-                println!(
-                    "Upload: {} → {}",
-                    path.display(),
-                    remote_file_path
-                );
-            }
-            _ if path.is_dir() && is_recursive => {
-                self.upload_recursive(local_path, remote_path).await?;
-            }
-            _ => {
-                return Err(anyhow::anyhow!("Local path is illegal"));
-            }
+            return Err(anyhow::anyhow!("Remote path does not exits!"));
+        } else if path.is_file() && !is_recursive {
+            let file_name = path.file_name().unwrap_or(OsStr::new(local_path));
+            let remote_file_path = Path::new(remote_path)
+                .join(file_name)
+                .to_string_lossy()
+                .to_string();
+            self.upload_file_streaming(&local_path.into(), &remote_file_path)
+                .await?;
+        } else if path.is_dir() && is_recursive {
+            self.upload_recursive(local_path, remote_path).await?;
+        } else {
+            return Err(anyhow::anyhow!("Local path is illegal"));
         }
 
         Ok(())
     }
 
+    /// Upload files recursively
     async fn upload_recursive(&self, local_path: &str, remote_path: &str) -> Result<()> {
         let local_path_type = Path::new(local_path);
-        let relative_path = local_path_type.file_name().unwrap_or(OsStr::new(local_path));
-        let mut entries = fs::read_dir(local_path).await?;
+        let relative_path = local_path_type
+            .file_name()
+            .unwrap_or_else(|| OsStr::new(local_path));
+
+        let mut entries = fs::read_dir(local_path)
+            .await
+            .with_context(|| format!("Failed to read directory: {local_path}"))?;
 
         while let Some(entry) = entries.next_entry().await? {
             let local_file_path = entry.path();
@@ -363,18 +367,66 @@ impl StorageClient {
             if local_file_path.is_dir() {
                 Box::pin(self.upload_recursive(&loca_recursive_path, &remote_file_path)).await?;
             } else {
-                let data = fs::read(&local_file_path).await?;
-                self.operator.write(&remote_file_path, data).await?;
-                println!(
-                    "Upload: {} → {}",
-                    local_file_path.display(),
-                    remote_file_path,
-                );
+                self.upload_file_streaming(&local_file_path, &remote_file_path)
+                    .await?;
             }
         }
         Ok(())
     }
-    
+
+    /// Upload file streaming
+    async fn upload_file_streaming(&self, local_path: &PathBuf, remote_path: &str) -> Result<()> {
+        const BUFFER_SIZE: usize = 8192; // 8KB buffer
+
+        let file = File::open(local_path)
+            .await
+            .with_context(|| format!("Failed to open file: {}", local_path.display()))?;
+
+        let file_size = file.metadata().await?.len();
+        let mut reader = BufReader::new(file);
+        let mut buffer = vec![0u8; BUFFER_SIZE];
+        let mut total_bytes = 0u64;
+
+        let mut writer = self.operator.writer(remote_path).await?;
+
+        loop {
+            let bytes_read = reader
+                .read(&mut buffer)
+                .await
+                .with_context(|| format!("Failed to read from file: {}", local_path.display()))?;
+
+            if bytes_read == 0 {
+                break; // EOF
+            }
+
+            let data_to_write = buffer[..bytes_read].to_vec();
+            writer
+                .write(data_to_write)
+                .await
+                .with_context(|| format!("Failed to write to remote: {remote_path}"))?;
+
+            total_bytes += bytes_read as u64;
+
+            if file_size > 0 {
+                let progress = (total_bytes as f64 / file_size as f64 * 100.0) as u32;
+                if total_bytes % (BUFFER_SIZE as u64 * 100) == 0 {
+                    print!("\r📤 Uploading {}: {}%", local_path.display(), progress);
+                    use std::io::{self, Write};
+                    io::stdout().flush().unwrap();
+                }
+            }
+        }
+
+        writer.close().await?;
+        println!(
+            "\n✅ Upload: {} → {} ({} bytes)",
+            local_path.display(),
+            remote_path,
+            total_bytes
+        );
+
+        Ok(())
+    }
 }
 
 /// File information for display
@@ -422,7 +474,7 @@ fn format_size(size: u64) -> String {
     const THRESHOLD: u64 = 1024;
 
     if size < THRESHOLD {
-        return format!("{}B", size);
+        return format!("{size}B");
     }
 
     let mut size_f = size as f64;
