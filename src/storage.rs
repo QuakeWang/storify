@@ -317,7 +317,7 @@ impl StorageClient {
         // check local path validity
         let path = Path::new(local_path);
         if !path.exists() {
-            return Err(anyhow::anyhow!("Local path cannot exits"));
+            return Err(anyhow::anyhow!("Local path does not exits!"));
         }
 
         // check remote path validity
@@ -335,7 +335,7 @@ impl StorageClient {
         } else if path.is_dir() && is_recursive {
             self.upload_recursive(local_path, remote_path).await?;
         } else {
-            return Err(anyhow::anyhow!("Local path is illegal"));
+            return Err(anyhow::anyhow!("Local path is illegal!"));
         }
 
         Ok(())
