@@ -317,13 +317,13 @@ impl StorageClient {
         // check local path validity
         let path = Path::new(local_path);
         if !path.exists() {
-            return Err(anyhow::anyhow!("Local path does not exits!"));
+            return Err(anyhow::anyhow!("Local path does not exist!"));
         }
 
         // check remote path validity
         let remote_path_exist = self.operator.exists(remote_path).await?;
         if !remote_path_exist {
-            return Err(anyhow::anyhow!("Remote path does not exits!"));
+            return Err(anyhow::anyhow!("Remote path does not exist!"));
         } else if path.is_file() && !is_recursive {
             let file_name = path.file_name().unwrap_or(OsStr::new(local_path));
             let remote_file_path = Path::new(remote_path)
