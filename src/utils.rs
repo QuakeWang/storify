@@ -10,7 +10,7 @@ pub fn confirm_deletion(paths: &[String], force: bool) -> Result<bool> {
 
     println!("About to delete {} item(s):", paths.len());
     for path in paths.iter().take(5) {
-        println!("  {}", path);
+        println!("  {path}");
     }
     if paths.len() > 5 {
         println!("  ... and {} more", paths.len() - 5);

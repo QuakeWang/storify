@@ -337,7 +337,7 @@ impl StorageClient {
 
             // Perform the deletion
             match self.operator.remove_all(path).await {
-                Ok(_) => println!("Deleted: {}", path),
+                Ok(_) => println!("Deleted: {path}"),
                 Err(e) => eprintln!("Failed to delete {path}: {e}"),
             }
         }
