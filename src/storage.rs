@@ -174,17 +174,17 @@ impl StorageClient {
                 if meta.mode() == EntryMode::DIR {
                     fs::create_dir_all(&local_file_path)
                         .await
-                        .with_context(|| format!("Failed to create dir: {:?}", local_file_path))?;
+                        .with_context(|| format!("Failed to create dir: {local_file_path:?}"))?;
                 } else {
                     if let Some(parent) = local_file_path.parent() {
                         fs::create_dir_all(parent).await.with_context(|| {
-                            format!("Failed to create parent dir: {:?}", parent)
+                            format!("Failed to create parent dir: {parent:?}")
                         })?;
                     }
                     let data = self.operator.read(remote_file_path).await?;
                     fs::write(&local_file_path, data.to_vec())
                         .await
-                        .with_context(|| format!("Failed to write file: {:?}", local_file_path))?;
+                        .with_context(|| format!("Failed to write file: {local_file_path:?}"))?;
                     println!(
                         "Downloaded: {} → {}",
                         remote_file_path,
@@ -250,7 +250,7 @@ impl StorageClient {
     async fn upload_recursive(&self, local_path: &str, remote_path: &str) -> Result<()> {
         let mut entries = fs::read_dir(local_path)
             .await
-            .with_context(|| format!("Failed to read directory: {}", local_path))?;
+            .with_context(|| format!("Failed to read directory: {local_path}"))?;
         while let Some(entry) = entries.next_entry().await? {
             let local_file_path = entry.path();
             let file_name = local_file_path.file_name().unwrap_or_default();
@@ -292,7 +292,7 @@ impl StorageClient {
             writer
                 .write(buffer[..bytes_read].to_vec())
                 .await
-                .with_context(|| format!("Failed to write to remote: {}", remote_path))?;
+                .with_context(|| format!("Failed to write to remote: {remote_path}"))?;
             total_bytes += bytes_read as u64;
             if file_size > 0 {
                 let progress = (total_bytes as f64 / file_size as f64 * 100.0) as u32;
@@ -316,7 +316,7 @@ impl StorageClient {
     fn print_entry(&self, entry: &opendal::Entry, long: bool) {
         if long {
             let file_info = FileInfo::from_entry(entry);
-            println!("{}", file_info);
+            println!("{file_info}");
         } else {
             println!("{}", entry.path());
         }
@@ -363,7 +363,7 @@ fn format_size(size: u64) -> String {
     const UNITS: &[&str] = &["B", "K", "M", "G", "T"];
     const THRESHOLD: u64 = 1024;
     if size < THRESHOLD {
-        return format!("{}B", size);
+        return format!("{size}B");
     }
     let mut size_f = size as f64;
     let mut unit_index = 0;
