@@ -177,9 +177,9 @@ impl StorageClient {
                         .with_context(|| format!("Failed to create dir: {local_file_path:?}"))?;
                 } else {
                     if let Some(parent) = local_file_path.parent() {
-                        fs::create_dir_all(parent).await.with_context(|| {
-                            format!("Failed to create parent dir: {parent:?}")
-                        })?;
+                        fs::create_dir_all(parent)
+                            .await
+                            .with_context(|| format!("Failed to create parent dir: {parent:?}"))?;
                     }
                     let data = self.operator.read(remote_file_path).await?;
                     fs::write(&local_file_path, data.to_vec())
