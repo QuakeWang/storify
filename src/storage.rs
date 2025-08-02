@@ -296,7 +296,7 @@ impl StorageClient {
             total_bytes += bytes_read as u64;
             if file_size > 0 {
                 let progress = (total_bytes as f64 / file_size as f64 * 100.0) as u32;
-                if total_bytes % (BUFFER_SIZE as u64 * 100) == 0 {
+                if total_bytes.is_multiple_of(BUFFER_SIZE as u64 * 100) {
                     print!("\r📤 Uploading {}: {}%", local_path.display(), progress);
                     use std::io::{self, Write};
                     io::stdout().flush().unwrap();
@@ -319,6 +319,42 @@ impl StorageClient {
             println!("{file_info}");
         } else {
             println!("{}", entry.path());
+        }
+    }
+
+    pub async fn delete_files(&self, paths: &[String], recursive: bool) -> Result<()> {
+        for path in paths {
+            // Check if path exists first
+            if !self.path_exists(path).await? {
+                eprintln!("Path not found: {path}");
+                continue;
+            }
+
+            // Check if it's a directory and recursive flag is not set
+            if self.is_directory(path).await? && !recursive {
+                return Err(anyhow!("Cannot delete directory without -R flag: {path}"));
+            }
+
+            // Perform the deletion
+            match self.operator.remove_all(path).await {
+                Ok(_) => println!("Deleted: {}", path),
+                Err(e) => eprintln!("Failed to delete {path}: {e}"),
+            }
+        }
+        Ok(())
+    }
+
+    async fn path_exists(&self, path: &str) -> Result<bool> {
+        match self.operator.stat(path).await {
+            Ok(_) => Ok(true),
+            Err(_) => Ok(false),
+        }
+    }
+
+    async fn is_directory(&self, path: &str) -> Result<bool> {
+        match self.operator.stat(path).await {
+            Ok(metadata) => Ok(metadata.mode().is_dir()),
+            Err(_) => Ok(false),
         }
     }
 }

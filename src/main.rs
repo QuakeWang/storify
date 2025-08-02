@@ -4,6 +4,7 @@ use clap::Parser;
 mod cli;
 mod config;
 mod storage;
+mod utils;
 
 use cli::Args;
 use config::load_storage_config;

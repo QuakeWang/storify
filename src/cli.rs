@@ -3,6 +3,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 use crate::storage::StorageClient;
+use crate::utils::confirm_deletion;
 
 /// Custom parser to validate that a path is not empty.
 fn parse_validated_path(path_str: &str) -> Result<String, String> {
@@ -36,6 +37,8 @@ pub enum Commands {
     Du(DuArgs),
     /// Upload files from local to remote (equivalent to hdfs dfs -put)
     Put(PutArgs),
+    /// Remove files/directories from remote storage (equivalent to hdfs dfs -rm)
+    Rm(RmArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -90,6 +93,21 @@ pub struct PutArgs {
     pub recursive: bool,
 }
 
+#[derive(Parser, Debug)]
+pub struct RmArgs {
+    /// Remote path(s) to delete
+    #[arg(value_name = "PATH", value_parser = parse_validated_path)]
+    pub paths: Vec<String>,
+
+    /// Remove directories and their contents recursively
+    #[arg(short = 'R', long)]
+    pub recursive: bool,
+
+    /// Force deletion without confirmation
+    #[arg(short = 'f', long)]
+    pub force: bool,
+}
+
 pub async fn run(args: Args, client: StorageClient) -> Result<()> {
     match args.command {
         Commands::Ls(ls_args) => {
@@ -108,6 +126,15 @@ pub async fn run(args: Args, client: StorageClient) -> Result<()> {
         Commands::Put(put_args) => {
             client
                 .upload_files(&put_args.local, &put_args.remote, put_args.recursive)
+                .await?;
+        }
+        Commands::Rm(rm_args) => {
+            if !confirm_deletion(&rm_args.paths, rm_args.force)? {
+                println!("Operation cancelled.");
+                return Ok(());
+            }
+            client
+                .delete_files(&rm_args.paths, rm_args.recursive)
                 .await?;
         }
     }
