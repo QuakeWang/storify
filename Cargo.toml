@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-anyhow = "1"
+snafu = "0.8"
 clap = { version = "4.5.42", features = ["derive", "env"] }
 opendal = { version = "0.54.0", features = ["services-oss", "services-s3", "services-fs"] }
 tokio = { version = "1.47.0", features = ["full"] }

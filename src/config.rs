@@ -1,14 +1,14 @@
-use anyhow::Result;
+use crate::error::{Error, Result};
+use crate::storage::{StorageConfig, StorageProvider};
 use std::env;
 use std::str::FromStr;
 
-use crate::storage::{StorageConfig, StorageProvider};
-
-// Helper function to reduce repetitive environment variable loading logic.
-fn get_env_var(primary_key: &str, secondary_key: &str, error_msg: &str) -> Result<String> {
+fn get_env_var(primary_key: &str, secondary_key: &str) -> Result<String> {
     env::var(primary_key)
         .or_else(|_| env::var(secondary_key))
-        .map_err(|_| anyhow::anyhow!(error_msg.to_string()))
+        .map_err(|_| Error::MissingEnvVar {
+            key: format!("{primary_key} or {secondary_key}"),
+        })
 }
 
 /// Load storage configuration from environment variables
@@ -25,23 +25,9 @@ pub fn load_storage_config() -> Result<StorageConfig> {
 
 /// Load OSS (Alibaba Cloud) configuration
 fn load_oss_config() -> Result<StorageConfig> {
-    let bucket = get_env_var(
-        "STORAGE_BUCKET",
-        "OSS_BUCKET",
-        "STORAGE_BUCKET or OSS_BUCKET environment variable is required",
-    )?;
-
-    let access_key_id = get_env_var(
-        "STORAGE_ACCESS_KEY_ID",
-        "OSS_ACCESS_KEY_ID",
-        "STORAGE_ACCESS_KEY_ID or OSS_ACCESS_KEY_ID environment variable is required",
-    )?;
-
-    let access_key_secret = get_env_var(
-        "STORAGE_ACCESS_KEY_SECRET",
-        "OSS_ACCESS_KEY_SECRET",
-        "STORAGE_ACCESS_KEY_SECRET or OSS_ACCESS_KEY_SECRET environment variable is required",
-    )?;
+    let bucket = get_env_var("STORAGE_BUCKET", "OSS_BUCKET")?;
+    let access_key_id = get_env_var("STORAGE_ACCESS_KEY_ID", "OSS_ACCESS_KEY_ID")?;
+    let access_key_secret = get_env_var("STORAGE_ACCESS_KEY_SECRET", "OSS_ACCESS_KEY_SECRET")?;
 
     let region = env::var("STORAGE_REGION")
         .or_else(|_| env::var("OSS_REGION"))
@@ -61,45 +47,21 @@ fn load_s3_config(provider_str: &str) -> Result<StorageConfig> {
     let is_minio = provider_str.to_lowercase() == "minio";
 
     let bucket = if is_minio {
-        get_env_var(
-            "STORAGE_BUCKET",
-            "MINIO_BUCKET",
-            "STORAGE_BUCKET or MINIO_BUCKET environment variable is required",
-        )?
+        get_env_var("STORAGE_BUCKET", "MINIO_BUCKET")?
     } else {
-        get_env_var(
-            "STORAGE_BUCKET",
-            "AWS_S3_BUCKET",
-            "STORAGE_BUCKET or AWS_S3_BUCKET environment variable is required",
-        )?
+        get_env_var("STORAGE_BUCKET", "AWS_S3_BUCKET")?
     };
 
     let access_key_id = if is_minio {
-        get_env_var(
-            "STORAGE_ACCESS_KEY_ID",
-            "MINIO_ACCESS_KEY",
-            "STORAGE_ACCESS_KEY_ID or MINIO_ACCESS_KEY environment variable is required",
-        )?
+        get_env_var("STORAGE_ACCESS_KEY_ID", "MINIO_ACCESS_KEY")?
     } else {
-        get_env_var(
-            "STORAGE_ACCESS_KEY_ID",
-            "AWS_ACCESS_KEY_ID",
-            "STORAGE_ACCESS_KEY_ID or AWS_ACCESS_KEY_ID environment variable is required",
-        )?
+        get_env_var("STORAGE_ACCESS_KEY_ID", "AWS_ACCESS_KEY_ID")?
     };
 
     let secret_access_key = if is_minio {
-        get_env_var(
-            "STORAGE_ACCESS_KEY_SECRET",
-            "MINIO_SECRET_KEY",
-            "STORAGE_ACCESS_KEY_SECRET or MINIO_SECRET_KEY environment variable is required",
-        )?
+        get_env_var("STORAGE_ACCESS_KEY_SECRET", "MINIO_SECRET_KEY")?
     } else {
-        get_env_var(
-            "STORAGE_ACCESS_KEY_SECRET",
-            "AWS_SECRET_ACCESS_KEY",
-            "STORAGE_ACCESS_KEY_SECRET or AWS_SECRET_ACCESS_KEY environment variable is required",
-        )?
+        get_env_var("STORAGE_ACCESS_KEY_SECRET", "AWS_SECRET_ACCESS_KEY")?
     };
 
     let region = env::var("STORAGE_REGION")

@@ -1,5 +1,5 @@
 /// Utility functions for user interaction and common operations.
-use anyhow::Result;
+use crate::error::Result;
 use std::io::{self, Write};
 
 /// Prompt user for confirmation before performing potentially destructive operations.

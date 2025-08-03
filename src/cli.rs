@@ -1,12 +1,11 @@
 /// This module handles Command Line Interface (CLI) related logic.
-use anyhow::Result;
-use clap::{Parser, Subcommand};
-
+use crate::error::Result;
 use crate::storage::StorageClient;
 use crate::utils::confirm_deletion;
+use clap::{Parser, Subcommand};
 
 /// Custom parser to validate that a path is not empty.
-fn parse_validated_path(path_str: &str) -> Result<String, String> {
+fn parse_validated_path(path_str: &str) -> std::result::Result<String, String> {
     if path_str.trim().is_empty() {
         Err("Path cannot be empty or just whitespace".to_string())
     } else {

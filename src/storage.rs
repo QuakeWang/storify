@@ -1,7 +1,11 @@
-use anyhow::{Context, Result, anyhow};
+use crate::error::{
+    DirectoryDeletionNotRecursiveSnafu, DirectoryUploadNotRecursiveSnafu, Error,
+    PartialDeletionSnafu, PathNotFoundSnafu, Result,
+};
 use async_recursion::async_recursion;
 use futures::stream::TryStreamExt;
 use opendal::{EntryMode, Operator};
+use snafu::ensure;
 use std::path::Path;
 use std::str::FromStr;
 use std::{ffi::OsStr, fmt};
@@ -17,14 +21,16 @@ pub enum StorageProvider {
 }
 
 impl FromStr for StorageProvider {
-    type Err = anyhow::Error;
+    type Err = Error;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> Result<Self> {
         match s.to_lowercase().as_str() {
             "oss" => Ok(Self::Oss),
             "s3" | "minio" => Ok(Self::S3),
             "fs" => Ok(Self::Fs),
-            _ => Err(anyhow!("Unsupported storage provider: {}", s)),
+            _ => Err(Error::UnsupportedProvider {
+                provider: s.to_string(),
+            }),
         }
     }
 }
@@ -145,9 +151,21 @@ impl StorageClient {
     }
 
     pub async fn list_directory(&self, path: &str, long: bool, recursive: bool) -> Result<()> {
-        let lister = self.operator.lister_with(path).recursive(recursive).await?;
+        let lister = self
+            .operator
+            .lister_with(path)
+            .recursive(recursive)
+            .await
+            .map_err(|e| Error::ListDirectoryFailed {
+                path: path.to_string(),
+                source: Box::new(Error::OpenDal { source: e }),
+            })?;
+
         lister
-            .map_err(anyhow::Error::from)
+            .map_err(|e| Error::ListDirectoryFailed {
+                path: path.to_string(),
+                source: Box::new(Error::OpenDal { source: e }),
+            })
             .try_for_each(|entry| async move {
                 self.print_entry(&entry, long);
                 Ok(())
@@ -156,13 +174,23 @@ impl StorageClient {
     }
 
     pub async fn download_files(&self, remote_path: &str, local_path: &str) -> Result<()> {
+        self.download_files_impl(remote_path, local_path)
+            .await
+            .map_err(|e| Error::DownloadFailed {
+                remote_path: remote_path.to_string(),
+                local_path: local_path.to_string(),
+                source: Box::new(e),
+            })
+    }
+
+    async fn download_files_impl(&self, remote_path: &str, local_path: &str) -> Result<()> {
         let lister = self
             .operator
             .lister_with(remote_path)
             .recursive(true)
             .await?;
         lister
-            .map_err(anyhow::Error::from)
+            .map_err(Error::from)
             .try_for_each_concurrent(10, |entry| async move {
                 let meta = entry.metadata();
                 let remote_file_path = entry.path();
@@ -172,22 +200,15 @@ impl StorageClient {
                 let local_file_path = Path::new(local_path).join(relative_path);
 
                 if meta.mode() == EntryMode::DIR {
-                    fs::create_dir_all(&local_file_path)
-                        .await
-                        .with_context(|| format!("Failed to create dir: {local_file_path:?}"))?;
+                    fs::create_dir_all(&local_file_path).await?;
                 } else {
                     if let Some(parent) = local_file_path.parent() {
-                        fs::create_dir_all(parent)
-                            .await
-                            .with_context(|| format!("Failed to create parent dir: {parent:?}"))?;
+                        fs::create_dir_all(parent).await?;
                     }
                     let data = self.operator.read(remote_file_path).await?;
-                    fs::write(&local_file_path, data.to_vec())
-                        .await
-                        .with_context(|| format!("Failed to write file: {local_file_path:?}"))?;
+                    fs::write(&local_file_path, data.to_vec()).await?;
                     println!(
-                        "Downloaded: {} → {}",
-                        remote_file_path,
+                        "Downloaded: {remote_file_path} → {}",
                         local_file_path.display()
                     );
                 }
@@ -199,7 +220,7 @@ impl StorageClient {
     pub async fn disk_usage(&self, path: &str, summary: bool) -> Result<()> {
         let lister = self.operator.lister_with(path).recursive(true).await?;
         let (total_size, total_files) = lister
-            .map_err(anyhow::Error::from)
+            .map_err(Error::from)
             .try_fold((0, 0), |(size, count), entry| async move {
                 let meta = entry.metadata();
                 if !summary {
@@ -210,7 +231,7 @@ impl StorageClient {
             .await?;
 
         if summary {
-            println!("{} {}", format_size(total_size), path);
+            println!("{} {path}", format_size(total_size));
             println!("Total files: {total_files}");
         }
         Ok(())
@@ -222,10 +243,28 @@ impl StorageClient {
         remote_path: &str,
         is_recursive: bool,
     ) -> Result<()> {
+        self.upload_files_impl(local_path, remote_path, is_recursive)
+            .await
+            .map_err(|e| Error::UploadFailed {
+                local_path: local_path.to_string(),
+                remote_path: remote_path.to_string(),
+                source: Box::new(e),
+            })
+    }
+
+    async fn upload_files_impl(
+        &self,
+        local_path: &str,
+        remote_path: &str,
+        is_recursive: bool,
+    ) -> Result<()> {
         let path = Path::new(local_path);
-        if !path.exists() {
-            return Err(anyhow!("Local path does not exist!"));
-        }
+        ensure!(
+            path.exists(),
+            PathNotFoundSnafu {
+                path: path.to_path_buf()
+            }
+        );
 
         if path.is_file() {
             let file_name = path.file_name().unwrap_or(OsStr::new(local_path));
@@ -235,12 +274,12 @@ impl StorageClient {
                 .to_string();
             self.upload_file_streaming(Path::new(local_path), &remote_file_path)
                 .await?;
-        } else if path.is_dir() && is_recursive {
-            self.upload_recursive(local_path, remote_path).await?;
-        } else if path.is_dir() && !is_recursive {
-            return Err(anyhow!("Use -R to upload directories."));
-        } else {
-            return Err(anyhow!("Local path is illegal!"));
+        } else if path.is_dir() {
+            if is_recursive {
+                self.upload_recursive(local_path, remote_path).await?;
+            } else {
+                return DirectoryUploadNotRecursiveSnafu.fail();
+            }
         }
 
         Ok(())
@@ -248,9 +287,7 @@ impl StorageClient {
 
     #[async_recursion]
     async fn upload_recursive(&self, local_path: &str, remote_path: &str) -> Result<()> {
-        let mut entries = fs::read_dir(local_path)
-            .await
-            .with_context(|| format!("Failed to read directory: {local_path}"))?;
+        let mut entries = fs::read_dir(local_path).await?;
         while let Some(entry) = entries.next_entry().await? {
             let local_file_path = entry.path();
             let file_name = local_file_path.file_name().unwrap_or_default();
@@ -272,9 +309,7 @@ impl StorageClient {
 
     async fn upload_file_streaming(&self, local_path: &Path, remote_path: &str) -> Result<()> {
         const BUFFER_SIZE: usize = 8192;
-        let file = fs::File::open(local_path)
-            .await
-            .with_context(|| format!("Failed to open file: {}", local_path.display()))?;
+        let file = fs::File::open(local_path).await?;
         let file_size = file.metadata().await?.len();
         let mut reader = BufReader::new(file);
         let mut buffer = vec![0u8; BUFFER_SIZE];
@@ -282,33 +317,25 @@ impl StorageClient {
         let mut writer = self.operator.writer(remote_path).await?;
 
         loop {
-            let bytes_read = reader
-                .read(&mut buffer)
-                .await
-                .with_context(|| format!("Failed to read from file: {}", local_path.display()))?;
+            let bytes_read = reader.read(&mut buffer).await?;
             if bytes_read == 0 {
                 break;
             }
-            writer
-                .write(buffer[..bytes_read].to_vec())
-                .await
-                .with_context(|| format!("Failed to write to remote: {remote_path}"))?;
+            writer.write(buffer[..bytes_read].to_vec()).await?;
             total_bytes += bytes_read as u64;
             if file_size > 0 {
                 let progress = (total_bytes as f64 / file_size as f64 * 100.0) as u32;
                 if total_bytes.is_multiple_of(BUFFER_SIZE as u64 * 100) {
-                    print!("\r📤 Uploading {}: {}%", local_path.display(), progress);
+                    print!("\r📤 Uploading {}: {progress}%", local_path.display());
                     use std::io::{self, Write};
-                    io::stdout().flush().unwrap();
+                    let _ = io::stdout().flush();
                 }
             }
         }
         writer.close().await?;
         println!(
-            "\n✅ Upload: {} → {} ({} bytes)",
+            "\n✅ Upload: {} → {remote_path} ({total_bytes} bytes)",
             local_path.display(),
-            remote_path,
-            total_bytes
         );
         Ok(())
     }
@@ -323,24 +350,32 @@ impl StorageClient {
     }
 
     pub async fn delete_files(&self, paths: &[String], recursive: bool) -> Result<()> {
+        let mut failed_paths = Vec::new();
+
         for path in paths {
-            // Check if path exists first
             if !self.path_exists(path).await? {
                 eprintln!("Path not found: {path}");
+                failed_paths.push(path.clone());
                 continue;
             }
 
-            // Check if it's a directory and recursive flag is not set
             if self.is_directory(path).await? && !recursive {
-                return Err(anyhow!("Cannot delete directory without -R flag: {path}"));
+                return DirectoryDeletionNotRecursiveSnafu { path: path.clone() }.fail();
             }
 
-            // Perform the deletion
             match self.operator.remove_all(path).await {
                 Ok(_) => println!("Deleted: {path}"),
-                Err(e) => eprintln!("Failed to delete {path}: {e}"),
+                Err(e) => {
+                    eprintln!("Failed to delete {path}: {e}");
+                    failed_paths.push(path.clone());
+                }
             }
         }
+
+        if !failed_paths.is_empty() {
+            return PartialDeletionSnafu { failed_paths }.fail();
+        }
+
         Ok(())
     }
 
@@ -387,11 +422,7 @@ impl fmt::Display for FileInfo {
             format_size(self.size)
         };
         let modified = self.modified.as_deref().unwrap_or("Unknown");
-        write!(
-            f,
-            "{:<6} {:>10} {} {}",
-            file_type, size_str, modified, self.path
-        )
+        write!(f, "{file_type:<6} {size_str:>10} {modified} {}", self.path)
     }
 }
 
@@ -407,5 +438,5 @@ fn format_size(size: u64) -> String {
         size_f /= THRESHOLD as f64;
         unit_index += 1;
     }
-    format!("{:.1}{}", size_f, UNITS[unit_index])
+    format!("{size_f:.1}{}", UNITS[unit_index])
 }
