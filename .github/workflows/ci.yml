@@ -33,8 +33,6 @@ jobs:
           - macos-latest
     steps:
       - uses: actions/checkout@v4
-      '''      '''    steps:
-      - uses: actions/checkout@v4
       - name: Test on Linux
         if: runner.os == 'Linux'
         run: cargo test --all-targets --workspace
