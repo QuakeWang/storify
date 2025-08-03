@@ -1,10 +1,6 @@
 use crate::error::{
-    DirectoryDeletionNotRecursiveSnafu,
-    DirectoryUploadNotRecursiveSnafu,
-    Error,
-    PartialDeletionSnafu,
-    PathNotFoundSnafu,
-    Result,
+    DirectoryDeletionNotRecursiveSnafu, DirectoryUploadNotRecursiveSnafu, Error,
+    PartialDeletionSnafu, PathNotFoundSnafu, Result,
 };
 use async_recursion::async_recursion;
 use futures::stream::TryStreamExt;

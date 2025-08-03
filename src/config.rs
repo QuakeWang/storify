@@ -33,7 +33,6 @@ fn load_hdfs_config() -> Result<StorageConfig> {
     Ok(StorageConfig::hdfs(name_node, root_path))
 }
 
-
 /// Load OSS (Alibaba Cloud) configuration
 fn load_oss_config() -> Result<StorageConfig> {
     let bucket = get_env_var("STORAGE_BUCKET", "OSS_BUCKET")?;
