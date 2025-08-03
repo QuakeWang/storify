@@ -20,8 +20,19 @@ pub fn load_storage_config() -> Result<StorageConfig> {
         StorageProvider::Oss => load_oss_config(),
         StorageProvider::S3 => load_s3_config(&provider_str),
         StorageProvider::Fs => load_fs_config(),
+        StorageProvider::Hdfs => load_hdfs_config(),
     }
 }
+
+/// Load HDFS configuration
+fn load_hdfs_config() -> Result<StorageConfig> {
+    let name_node = env::var("HDFS_NAME_NODE").map_err(|_| Error::MissingEnvVar {
+        key: "HDFS_NAME_NODE".to_string(),
+    })?;
+    let root_path = env::var("HDFS_ROOT_PATH").unwrap_or_else(|_| "/".to_string());
+    Ok(StorageConfig::hdfs(name_node, root_path))
+}
+
 
 /// Load OSS (Alibaba Cloud) configuration
 fn load_oss_config() -> Result<StorageConfig> {

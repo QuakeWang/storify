@@ -1,6 +1,10 @@
 use crate::error::{
-    DirectoryDeletionNotRecursiveSnafu, DirectoryUploadNotRecursiveSnafu, Error,
-    PartialDeletionSnafu, PathNotFoundSnafu, Result,
+    DirectoryDeletionNotRecursiveSnafu,
+    DirectoryUploadNotRecursiveSnafu,
+    Error,
+    PartialDeletionSnafu,
+    PathNotFoundSnafu,
+    Result,
 };
 use async_recursion::async_recursion;
 use futures::stream::TryStreamExt;
@@ -18,6 +22,7 @@ pub enum StorageProvider {
     Oss,
     S3,
     Fs,
+    Hdfs,
 }
 
 impl FromStr for StorageProvider {
@@ -28,6 +33,7 @@ impl FromStr for StorageProvider {
             "oss" => Ok(Self::Oss),
             "s3" | "minio" => Ok(Self::S3),
             "fs" => Ok(Self::Fs),
+            "hdfs" => Ok(Self::Hdfs),
             _ => Err(Error::UnsupportedProvider {
                 provider: s.to_string(),
             }),
@@ -45,6 +51,7 @@ pub struct StorageConfig {
     pub endpoint: Option<String>,
     pub region: Option<String>,
     pub root_path: Option<String>,
+    pub name_node: Option<String>,
 }
 
 impl StorageConfig {
@@ -62,6 +69,7 @@ impl StorageConfig {
             endpoint: None,
             region,
             root_path: None,
+            name_node: None,
         }
     }
 
@@ -79,6 +87,7 @@ impl StorageConfig {
             endpoint: None,
             region,
             root_path: None,
+            name_node: None,
         }
     }
 
@@ -91,6 +100,20 @@ impl StorageConfig {
             endpoint: None,
             region: None,
             root_path: Some(root_path),
+            name_node: None,
+        }
+    }
+
+    pub fn hdfs(name_node: String, root_path: String) -> Self {
+        Self {
+            provider: StorageProvider::Hdfs,
+            bucket: "hdfs".to_string(), // Bucket is not really used for HDFS
+            access_key_id: None,
+            access_key_secret: None,
+            endpoint: None,
+            region: None,
+            root_path: Some(root_path),
+            name_node: Some(name_node),
         }
     }
 }
@@ -145,6 +168,14 @@ impl StorageClient {
             StorageProvider::Fs => {
                 let root = config.root_path.as_deref().unwrap_or("./");
                 let builder = opendal::services::Fs::default().root(root);
+                Ok(Operator::new(builder)?.finish())
+            }
+            StorageProvider::Hdfs => {
+                let root = config.root_path.as_deref().unwrap_or("/");
+                let name_node = config.name_node.as_deref().unwrap_or_default();
+                let builder = opendal::services::Hdfs::default()
+                    .root(root)
+                    .name_node(name_node);
                 Ok(Operator::new(builder)?.finish())
             }
         }
