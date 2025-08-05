@@ -13,7 +13,10 @@ fn get_env_var(primary_key: &str, secondary_key: &str) -> Result<String> {
 
 /// Load storage configuration from environment variables
 pub fn load_storage_config() -> Result<StorageConfig> {
-    let provider_str = env::var("STORAGE_PROVIDER").unwrap_or_else(|_| "oss".to_string());
+    let provider_str = env::var("STORAGE_PROVIDER").unwrap_or_else(|_| {
+        eprintln!("STORAGE_PROVIDER not set, using default: oss");
+        "oss".to_string()
+    });
     let provider = StorageProvider::from_str(&provider_str)?;
 
     match provider {
