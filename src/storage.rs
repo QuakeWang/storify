@@ -189,7 +189,7 @@ impl StorageClient {
             .lister_with(remote_path)
             .recursive(true)
             .await?;
-        
+
         let mut stream = lister;
         while let Some(entry) = stream.try_next().await? {
             let meta = entry.metadata();
@@ -213,7 +213,7 @@ impl StorageClient {
                 );
             }
         }
-        
+
         Ok(())
     }
 
