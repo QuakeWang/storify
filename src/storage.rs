@@ -158,13 +158,13 @@ impl StorageClient {
             .await
             .map_err(|e| Error::ListDirectoryFailed {
                 path: path.to_string(),
-                source: Box::new(Error::OpenDal { source: e }),
+                source: Box::new(Error::from(e)),
             })?;
 
         lister
             .map_err(|e| Error::ListDirectoryFailed {
                 path: path.to_string(),
-                source: Box::new(Error::OpenDal { source: e }),
+                source: Box::new(Error::from(e)),
             })
             .try_for_each(|entry| async move {
                 self.print_entry(&entry, long);
@@ -189,38 +189,46 @@ impl StorageClient {
             .lister_with(remote_path)
             .recursive(true)
             .await?;
-        lister
-            .map_err(Error::from)
-            .try_for_each_concurrent(10, |entry| async move {
-                let meta = entry.metadata();
-                let remote_file_path = entry.path();
-                let relative_path = remote_file_path
-                    .strip_prefix(remote_path)
-                    .unwrap_or(remote_file_path);
-                let local_file_path = Path::new(local_path).join(relative_path);
+        
+        let mut stream = lister;
+        while let Some(entry) = stream.try_next().await? {
+            let meta = entry.metadata();
+            let remote_file_path = entry.path();
+            let relative_path = remote_file_path
+                .strip_prefix(remote_path)
+                .unwrap_or(remote_file_path);
+            let local_file_path = Path::new(local_path).join(relative_path);
 
-                if meta.mode() == EntryMode::DIR {
-                    fs::create_dir_all(&local_file_path).await?;
-                } else {
-                    if let Some(parent) = local_file_path.parent() {
-                        fs::create_dir_all(parent).await?;
-                    }
-                    let data = self.operator.read(remote_file_path).await?;
-                    fs::write(&local_file_path, data.to_vec()).await?;
-                    println!(
-                        "Downloaded: {remote_file_path} → {}",
-                        local_file_path.display()
-                    );
+            if meta.mode() == EntryMode::DIR {
+                fs::create_dir_all(&local_file_path).await?;
+            } else {
+                if let Some(parent) = local_file_path.parent() {
+                    fs::create_dir_all(parent).await?;
                 }
-                Ok(())
-            })
-            .await
+                let data = self.operator.read(remote_file_path).await?;
+                fs::write(&local_file_path, data.to_vec()).await?;
+                println!(
+                    "Downloaded: {remote_file_path} → {}",
+                    local_file_path.display()
+                );
+            }
+        }
+        
+        Ok(())
     }
 
     pub async fn disk_usage(&self, path: &str, summary: bool) -> Result<()> {
+        self.disk_usage_impl(path, summary)
+            .await
+            .map_err(|e| Error::DiskUsageFailed {
+                path: path.to_string(),
+                source: Box::new(e),
+            })
+    }
+
+    async fn disk_usage_impl(&self, path: &str, summary: bool) -> Result<()> {
         let lister = self.operator.lister_with(path).recursive(true).await?;
         let (total_size, total_files) = lister
-            .map_err(Error::from)
             .try_fold((0, 0), |(size, count), entry| async move {
                 let meta = entry.metadata();
                 if !summary {

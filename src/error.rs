@@ -15,13 +15,16 @@ pub enum Error {
     #[snafu(display("Path does not exist: {}", path.display()))]
     PathNotFound { path: PathBuf },
 
+    #[snafu(display("Invalid path: {path}"))]
+    InvalidPath { path: String },
+
     #[snafu(display("Cannot delete directory without -R flag: {path}"))]
     DirectoryDeletionNotRecursive { path: String },
 
     #[snafu(display("Use -R to upload directories"))]
     DirectoryUploadNotRecursive,
 
-    #[snafu(display("Partial deletion failure: {} path(s) failed to delete: {}", failed_paths.len(), failed_paths.join(", ")))]
+    #[snafu(display("Partial deletion failure: {} path(s) failed to delete", failed_paths.len()))]
     PartialDeletion { failed_paths: Vec<String> },
 
     #[snafu(display("Failed to download '{remote_path}' to '{local_path}': {source}"))]
@@ -40,6 +43,9 @@ pub enum Error {
 
     #[snafu(display("Failed to list directory '{path}': {source}"))]
     ListDirectoryFailed { path: String, source: Box<Error> },
+
+    #[snafu(display("Failed to get disk usage for '{path}': {source}"))]
+    DiskUsageFailed { path: String, source: Box<Error> },
 
     #[snafu(display("OpenDAL error: {source}"))]
     OpenDal { source: opendal::Error },
