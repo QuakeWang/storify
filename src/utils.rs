@@ -22,5 +22,6 @@ pub fn confirm_deletion(paths: &[String], force: bool) -> Result<bool> {
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
 
-    Ok(input.trim().to_lowercase() == "y" || input.trim().to_lowercase() == "yes")
+    let trimmed = input.trim().to_lowercase();
+    Ok(trimmed == "y" || trimmed == "yes")
 }
