@@ -1,5 +1,5 @@
 use crate::error::{
-    DirectoryDeletionNotRecursiveSnafu, DirectoryUploadNotRecursiveSnafu, Error,
+    DirectoryDeletionNotRecursiveSnafu, DirectoryUploadNotRecursiveSnafu, Error, InvalidPathSnafu,
     PartialDeletionSnafu, PathNotFoundSnafu, Result,
 };
 use async_recursion::async_recursion;
@@ -420,11 +420,13 @@ impl StorageClient {
             Ok(_) => {
                 ensure!(
                     self.operator.exists(src_path).await?,
-                    PathNotFoundSnafu { path: src_path }
+                    InvalidPathSnafu {
+                        path: src_path.to_string(),
+                    }
                 );
                 Ok(())
             }
-            Err(_) => Err(Error::PathNotFound {
+            Err(_) => Err(Error::InvalidPath {
                 path: src_path.to_string(),
             }),
         }

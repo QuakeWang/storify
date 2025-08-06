@@ -1,5 +1,5 @@
 use snafu::Snafu;
-// use std::path::PathBuf;
+use std::path::PathBuf;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -12,11 +12,8 @@ pub enum Error {
     #[snafu(display("Unsupported storage provider: {provider}"))]
     UnsupportedProvider { provider: String },
 
-    #[snafu(display("Path does not exist: {}", path))]
-    PathNotFound { path: String },
-
-    #[snafu(display("Invalid path: {path}"))]
-    InvalidPath { path: String },
+    #[snafu(display("Path does not exist: {}", path.display()))]
+    PathNotFound { path: PathBuf },
 
     #[snafu(display("Invalid path: {path}"))]
     InvalidPath { path: String },
