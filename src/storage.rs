@@ -1,16 +1,19 @@
-use crate::error::{
-    DirectoryDeletionNotRecursiveSnafu, DirectoryUploadNotRecursiveSnafu, Error, InvalidPathSnafu,
-    PartialDeletionSnafu, PathNotFoundSnafu, Result,
-};
-use async_recursion::async_recursion;
-use futures::stream::TryStreamExt;
-use opendal::{EntryMode, Operator};
-use snafu::ensure;
-use std::path::Path;
+use crate::error::{Error, Result};
+use opendal::Operator;
 use std::str::FromStr;
-use std::{ffi::OsStr, fmt};
-use tokio::fs;
-use tokio::io::{AsyncReadExt, BufReader};
+
+pub mod constants;
+mod operations;
+mod utils;
+
+use self::operations::copy::OpenDalCopier;
+use self::operations::delete::OpenDalDeleter;
+use self::operations::download::OpenDalDownloader;
+use self::operations::list::OpenDalLister;
+use self::operations::upload::OpenDalUploader;
+use self::operations::usage::OpenDalUsageCalculator;
+use self::operations::{Copier, Deleter, Downloader, Lister, Uploader, UsageCalculator};
+use crate::wrap_err;
 
 /// Storage provider types
 #[derive(Debug, Clone)]
@@ -151,98 +154,34 @@ impl StorageClient {
     }
 
     pub async fn list_directory(&self, path: &str, long: bool, recursive: bool) -> Result<()> {
-        let lister = self
-            .operator
-            .lister_with(path)
-            .recursive(recursive)
-            .await
-            .map_err(|e| Error::ListDirectoryFailed {
-                path: path.to_string(),
-                source: Box::new(Error::from(e)),
-            })?;
-
-        lister
-            .map_err(|e| Error::ListDirectoryFailed {
-                path: path.to_string(),
-                source: Box::new(Error::from(e)),
-            })
-            .try_for_each(|entry| async move {
-                self.print_entry(&entry, long);
-                Ok(())
-            })
-            .await
+        let lister = OpenDalLister::new(self.operator.clone());
+        wrap_err!(
+            lister.list(path, long, recursive).await,
+            ListDirectoryFailed {
+                path: path.to_string()
+            }
+        )
     }
 
     pub async fn download_files(&self, remote_path: &str, local_path: &str) -> Result<()> {
-        self.download_files_impl(remote_path, local_path)
-            .await
-            .map_err(|e| Error::DownloadFailed {
+        let downloader = OpenDalDownloader::new(self.operator.clone());
+        wrap_err!(
+            downloader.download(remote_path, local_path).await,
+            DownloadFailed {
                 remote_path: remote_path.to_string(),
-                local_path: local_path.to_string(),
-                source: Box::new(e),
-            })
-    }
-
-    async fn download_files_impl(&self, remote_path: &str, local_path: &str) -> Result<()> {
-        let lister = self
-            .operator
-            .lister_with(remote_path)
-            .recursive(true)
-            .await?;
-
-        let mut stream = lister;
-        while let Some(entry) = stream.try_next().await? {
-            let meta = entry.metadata();
-            let remote_file_path = entry.path();
-            let relative_path = remote_file_path
-                .strip_prefix(remote_path)
-                .unwrap_or(remote_file_path);
-            let local_file_path = Path::new(local_path).join(relative_path);
-
-            if meta.mode() == EntryMode::DIR {
-                fs::create_dir_all(&local_file_path).await?;
-            } else {
-                if let Some(parent) = local_file_path.parent() {
-                    fs::create_dir_all(parent).await?;
-                }
-                let data = self.operator.read(remote_file_path).await?;
-                fs::write(&local_file_path, data.to_vec()).await?;
-                println!(
-                    "Downloaded: {remote_file_path} → {}",
-                    local_file_path.display()
-                );
+                local_path: local_path.to_string()
             }
-        }
-
-        Ok(())
+        )
     }
 
     pub async fn disk_usage(&self, path: &str, summary: bool) -> Result<()> {
-        self.disk_usage_impl(path, summary)
-            .await
-            .map_err(|e| Error::DiskUsageFailed {
-                path: path.to_string(),
-                source: Box::new(e),
-            })
-    }
-
-    async fn disk_usage_impl(&self, path: &str, summary: bool) -> Result<()> {
-        let lister = self.operator.lister_with(path).recursive(true).await?;
-        let (total_size, total_files) = lister
-            .try_fold((0, 0), |(size, count), entry| async move {
-                let meta = entry.metadata();
-                if !summary {
-                    println!("{} {}", format_size(meta.content_length()), entry.path());
-                }
-                Ok((size + meta.content_length(), count + 1))
-            })
-            .await?;
-
-        if summary {
-            println!("{} {path}", format_size(total_size));
-            println!("Total files: {total_files}");
-        }
-        Ok(())
+        let calculator = OpenDalUsageCalculator::new(self.operator.clone());
+        wrap_err!(
+            calculator.calculate_usage(path, summary).await,
+            DiskUsageFailed {
+                path: path.to_string()
+            }
+        )
     }
 
     pub async fn upload_files(
@@ -251,297 +190,29 @@ impl StorageClient {
         remote_path: &str,
         is_recursive: bool,
     ) -> Result<()> {
-        self.upload_files_impl(local_path, remote_path, is_recursive)
-            .await
-            .map_err(|e| Error::UploadFailed {
+        let uploader = OpenDalUploader::new(self.operator.clone());
+        wrap_err!(
+            uploader.upload(local_path, remote_path, is_recursive).await,
+            UploadFailed {
                 local_path: local_path.to_string(),
-                remote_path: remote_path.to_string(),
-                source: Box::new(e),
-            })
-    }
-
-    async fn upload_files_impl(
-        &self,
-        local_path: &str,
-        remote_path: &str,
-        is_recursive: bool,
-    ) -> Result<()> {
-        let path = Path::new(local_path);
-        ensure!(
-            path.exists(),
-            PathNotFoundSnafu {
-                path: path.to_path_buf()
+                remote_path: remote_path.to_string()
             }
-        );
-
-        if path.is_file() {
-            let file_name = path.file_name().unwrap_or(OsStr::new(local_path));
-            let remote_file_path = Path::new(remote_path)
-                .join(file_name)
-                .to_string_lossy()
-                .to_string();
-            self.upload_file_streaming(Path::new(local_path), &remote_file_path)
-                .await?;
-        } else if path.is_dir() {
-            if is_recursive {
-                self.upload_recursive(local_path, remote_path).await?;
-            } else {
-                return DirectoryUploadNotRecursiveSnafu.fail();
-            }
-        }
-
-        Ok(())
-    }
-
-    #[async_recursion]
-    async fn upload_recursive(&self, local_path: &str, remote_path: &str) -> Result<()> {
-        let mut entries = fs::read_dir(local_path).await?;
-        while let Some(entry) = entries.next_entry().await? {
-            let local_file_path = entry.path();
-            let file_name = local_file_path.file_name().unwrap_or_default();
-            let new_remote_path = Path::new(remote_path)
-                .join(file_name)
-                .to_string_lossy()
-                .to_string();
-
-            if local_file_path.is_dir() {
-                self.upload_recursive(&local_file_path.to_string_lossy(), &new_remote_path)
-                    .await?;
-            } else {
-                self.upload_file_streaming(&local_file_path, &new_remote_path)
-                    .await?;
-            }
-        }
-        Ok(())
-    }
-
-    async fn upload_file_streaming(&self, local_path: &Path, remote_path: &str) -> Result<()> {
-        const BUFFER_SIZE: usize = 8192;
-        let file = fs::File::open(local_path).await?;
-        let file_size = file.metadata().await?.len();
-        let mut reader = BufReader::new(file);
-        let mut buffer = vec![0u8; BUFFER_SIZE];
-        let mut total_bytes = 0u64;
-        let mut writer = self.operator.writer(remote_path).await?;
-
-        loop {
-            let bytes_read = reader.read(&mut buffer).await?;
-            if bytes_read == 0 {
-                break;
-            }
-            writer.write(buffer[..bytes_read].to_vec()).await?;
-            total_bytes += bytes_read as u64;
-            if file_size > 0 {
-                let progress = (total_bytes as f64 / file_size as f64 * 100.0) as u32;
-                if total_bytes.is_multiple_of(BUFFER_SIZE as u64 * 100) {
-                    print!("\r Uploading {}: {progress}%", local_path.display());
-                    use std::io::{self, Write};
-                    let _ = io::stdout().flush();
-                }
-            }
-        }
-        writer.close().await?;
-        println!(
-            "\n✅ Upload: {} → {remote_path} ({total_bytes} bytes)",
-            local_path.display(),
-        );
-        Ok(())
-    }
-
-    fn print_entry(&self, entry: &opendal::Entry, long: bool) {
-        if long {
-            let file_info = FileInfo::from_entry(entry);
-            println!("{file_info}");
-        } else {
-            println!("{}", entry.path());
-        }
+        )
     }
 
     pub async fn delete_files(&self, paths: &[String], recursive: bool) -> Result<()> {
-        let mut failed_paths = Vec::new();
-
-        for path in paths {
-            if !self.path_exists(path).await? {
-                eprintln!("Path not found: {path}");
-                failed_paths.push(path.clone());
-                continue;
-            }
-
-            if self.is_directory(path).await? && !recursive {
-                return DirectoryDeletionNotRecursiveSnafu { path: path.clone() }.fail();
-            }
-
-            match self.operator.remove_all(path).await {
-                Ok(_) => println!("Deleted: {path}"),
-                Err(e) => {
-                    eprintln!("Failed to delete {path}: {e}");
-                    failed_paths.push(path.clone());
-                }
-            }
-        }
-
-        if !failed_paths.is_empty() {
-            return PartialDeletionSnafu { failed_paths }.fail();
-        }
-
-        Ok(())
-    }
-
-    async fn path_exists(&self, path: &str) -> Result<bool> {
-        match self.operator.stat(path).await {
-            Ok(_) => Ok(true),
-            Err(_) => Ok(false),
-        }
-    }
-
-    async fn is_directory(&self, path: &str) -> Result<bool> {
-        match self.operator.stat(path).await {
-            Ok(metadata) => Ok(metadata.mode().is_dir()),
-            Err(_) => Ok(false),
-        }
+        let deleter = OpenDalDeleter::new(self.operator.clone());
+        deleter.delete(paths, recursive).await
     }
 
     pub async fn copy_files(&self, src_path: &str, dest_path: &str) -> Result<()> {
-        self.copy_files_impl(src_path, dest_path)
-            .await
-            .map_err(|e| Error::CopyFailed {
+        let copier = OpenDalCopier::new(self.operator.clone());
+        wrap_err!(
+            copier.copy(src_path, dest_path).await,
+            CopyFailed {
                 src_path: src_path.to_string(),
-                dest_path: dest_path.to_string(),
-                source: Box::new(e),
-            })
-    }
-
-    async fn copy_files_impl(&self, src_path: &str, dest_path: &str) -> Result<()> {
-        match self.operator.list_with(src_path).limit(1).await {
-            Ok(entries) if !entries.is_empty() => {
-                self.copy_file_recursive(src_path, dest_path).await?;
-                Ok(())
+                dest_path: dest_path.to_string()
             }
-            Ok(_) => {
-                ensure!(
-                    self.operator.exists(src_path).await?,
-                    InvalidPathSnafu {
-                        path: src_path.to_string(),
-                    }
-                );
-                Ok(())
-            }
-            Err(_) => Err(Error::InvalidPath {
-                path: src_path.to_string(),
-            }),
-        }
+        )
     }
-
-    #[async_recursion]
-    async fn copy_file_recursive(&self, src_path: &str, dest_path: &str) -> Result<()> {
-        let entries = self.operator.list_with(src_path).recursive(true).await?;
-
-        for entry in &entries {
-            let meta: &opendal::Metadata = entry.metadata();
-            let local_file_path = entry.path();
-            let file_name = local_file_path
-                .strip_prefix(src_path)
-                .unwrap_or(local_file_path);
-            let new_dest_path = Path::new(dest_path)
-                .join(file_name)
-                .to_string_lossy()
-                .to_string();
-
-            if meta.mode() == EntryMode::DIR {
-                self.copy_file_recursive(local_file_path, &new_dest_path)
-                    .await?;
-            } else {
-                self.stream_copy(local_file_path, &new_dest_path).await?;
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn stream_copy(&self, src_path: &str, dest_path: &str) -> opendal::Result<()> {
-        const CHUNK_SIZE: usize = 1024 * 1024;
-
-        let metadata = self.operator.stat(src_path).await?;
-        let file_size = metadata.content_length();
-
-        let mut writer = self.operator.writer(dest_path).await?;
-        let mut total_bytes = 0u64;
-        let mut offset = 0u64;
-
-        loop {
-            let chunk_size = std::cmp::min(CHUNK_SIZE as u64, file_size - offset);
-
-            let data = self
-                .operator
-                .read_with(src_path)
-                .range(offset..offset + chunk_size)
-                .await?;
-            let data_len = data.len();
-            if data_len == 0 {
-                break;
-            }
-
-            writer.write(data).await?;
-            total_bytes += data_len as u64;
-            offset += chunk_size;
-
-            if total_bytes.is_multiple_of(CHUNK_SIZE as u64) {
-                let progress = (total_bytes as f64 / file_size as f64 * 100.0) as u32;
-                print!("\r Copying {src_path}: {progress}%");
-                use std::io::{self, Write};
-                let _ = io::stdout().flush();
-            }
-        }
-
-        writer.close().await?;
-        println!("\n✅ Copied: {src_path} → {dest_path} ({total_bytes} bytes)");
-
-        Ok(())
-    }
-}
-struct FileInfo {
-    path: String,
-    size: u64,
-    modified: Option<String>,
-    is_dir: bool,
-}
-
-impl FileInfo {
-    fn from_entry(entry: &opendal::Entry) -> Self {
-        let meta = entry.metadata();
-        Self {
-            path: entry.path().to_string(),
-            size: meta.content_length(),
-            modified: meta.last_modified().map(|t| t.to_rfc3339()),
-            is_dir: meta.mode().is_dir(),
-        }
-    }
-}
-
-impl fmt::Display for FileInfo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let file_type = if self.is_dir { "DIR" } else { "FILE" };
-        let size_str = if self.is_dir {
-            "-".to_string()
-        } else {
-            format_size(self.size)
-        };
-        let modified = self.modified.as_deref().unwrap_or("Unknown");
-        write!(f, "{file_type:<6} {size_str:>10} {modified} {}", self.path)
-    }
-}
-
-fn format_size(size: u64) -> String {
-    const UNITS: &[&str] = &["B", "K", "M", "G", "T"];
-    const THRESHOLD: u64 = 1024;
-    if size < THRESHOLD {
-        return format!("{size}B");
-    }
-    let mut size_f = size as f64;
-    let mut unit_index = 0;
-    while size_f >= THRESHOLD as f64 && unit_index < UNITS.len() - 1 {
-        size_f /= THRESHOLD as f64;
-        unit_index += 1;
-    }
-    format!("{size_f:.1}{}", UNITS[unit_index])
 }

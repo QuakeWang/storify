@@ -1,103 +1,111 @@
 use crate::error::{Error, Result};
+use crate::storage::constants::DEFAULT_FS_ROOT;
 use crate::storage::{StorageConfig, StorageProvider};
+use log::warn;
 use std::env;
 use std::str::FromStr;
 
-fn get_env_var(primary_key: &str, secondary_key: &str) -> Result<String> {
-    env::var(primary_key)
-        .or_else(|_| env::var(secondary_key))
-        .map_err(|_| Error::MissingEnvVar {
-            key: format!("{primary_key} or {secondary_key}"),
-        })
+/// Read the first available environment variable from a list of keys
+fn env_any(keys: &[&str]) -> Option<String> {
+    for key in keys {
+        if let Ok(val) = env::var(key) {
+            return Some(val);
+        }
+    }
+    None
+}
+
+/// Read a required environment variable from a list of keys
+fn env_any_required(keys: &[&str]) -> Result<String> {
+    env_any(keys).ok_or_else(|| Error::MissingEnvVar {
+        key: keys.join(" or "),
+    })
+}
+
+/// Provider-specific environment variable keys
+struct ProviderKeys {
+    bucket: Vec<&'static str>,
+    access_key_id: Vec<&'static str>,
+    secret_key: Vec<&'static str>,
+    region: Vec<&'static str>,
+    endpoint: Vec<&'static str>,
+}
+
+impl ProviderKeys {
+    fn for_oss() -> Self {
+        Self {
+            bucket: vec!["STORAGE_BUCKET", "OSS_BUCKET"],
+            access_key_id: vec!["STORAGE_ACCESS_KEY_ID", "OSS_ACCESS_KEY_ID"],
+            secret_key: vec!["STORAGE_ACCESS_KEY_SECRET", "OSS_ACCESS_KEY_SECRET"],
+            region: vec!["STORAGE_REGION", "OSS_REGION"],
+            endpoint: vec!["STORAGE_ENDPOINT", "OSS_ENDPOINT"],
+        }
+    }
+
+    fn for_aws() -> Self {
+        Self {
+            bucket: vec!["STORAGE_BUCKET", "AWS_S3_BUCKET"],
+            access_key_id: vec!["STORAGE_ACCESS_KEY_ID", "AWS_ACCESS_KEY_ID"],
+            secret_key: vec!["STORAGE_ACCESS_KEY_SECRET", "AWS_SECRET_ACCESS_KEY"],
+            region: vec!["STORAGE_REGION", "AWS_DEFAULT_REGION"],
+            endpoint: vec!["STORAGE_ENDPOINT"],
+        }
+    }
+
+    fn for_minio() -> Self {
+        Self {
+            bucket: vec!["STORAGE_BUCKET", "MINIO_BUCKET"],
+            access_key_id: vec!["STORAGE_ACCESS_KEY_ID", "MINIO_ACCESS_KEY"],
+            secret_key: vec!["STORAGE_ACCESS_KEY_SECRET", "MINIO_SECRET_KEY"],
+            region: vec!["STORAGE_REGION", "MINIO_DEFAULT_REGION"],
+            endpoint: vec!["STORAGE_ENDPOINT", "MINIO_ENDPOINT"],
+        }
+    }
+}
+
+/// Select appropriate ProviderKeys for S3-like providers (AWS/MinIO)
+fn s3_like_keys(provider_str: &str) -> ProviderKeys {
+    if provider_str.eq_ignore_ascii_case("minio") {
+        ProviderKeys::for_minio()
+    } else {
+        ProviderKeys::for_aws()
+    }
 }
 
 /// Load storage configuration from environment variables
 pub fn load_storage_config() -> Result<StorageConfig> {
     let provider_str = env::var("STORAGE_PROVIDER").unwrap_or_else(|_| {
-        eprintln!("STORAGE_PROVIDER not set, using default: oss");
+        warn!("STORAGE_PROVIDER not set, using default: oss");
         "oss".to_string()
     });
     let provider = StorageProvider::from_str(&provider_str)?;
 
     match provider {
-        StorageProvider::Oss => load_oss_config(),
-        StorageProvider::S3 => load_s3_config(&provider_str),
+        StorageProvider::Oss => load_cloud_config(ProviderKeys::for_oss(), StorageConfig::oss),
+        StorageProvider::S3 => load_cloud_config(s3_like_keys(&provider_str), StorageConfig::s3),
         StorageProvider::Fs => load_fs_config(),
     }
 }
 
-/// Load OSS (Alibaba Cloud) configuration
-fn load_oss_config() -> Result<StorageConfig> {
-    let bucket = get_env_var("STORAGE_BUCKET", "OSS_BUCKET")?;
-    let access_key_id = get_env_var("STORAGE_ACCESS_KEY_ID", "OSS_ACCESS_KEY_ID")?;
-    let access_key_secret = get_env_var("STORAGE_ACCESS_KEY_SECRET", "OSS_ACCESS_KEY_SECRET")?;
+/// Load configuration for any cloud storage provider
+fn load_cloud_config<F>(keys: ProviderKeys, config_constructor: F) -> Result<StorageConfig>
+where
+    F: FnOnce(String, String, String, Option<String>) -> StorageConfig,
+{
+    let bucket = env_any_required(&keys.bucket)?;
+    let access_key_id = env_any_required(&keys.access_key_id)?;
+    let secret_key = env_any_required(&keys.secret_key)?;
 
-    let region = env::var("STORAGE_REGION")
-        .or_else(|_| env::var("OSS_REGION"))
-        .ok();
+    let region = env_any(&keys.region);
+    let endpoint = env_any(&keys.endpoint);
 
-    let endpoint = env::var("STORAGE_ENDPOINT")
-        .or_else(|_| env::var("OSS_ENDPOINT"))
-        .unwrap_or_else(|_| "https://oss-cn-hangzhou.aliyuncs.com".to_string());
-
-    let mut config = StorageConfig::oss(bucket, access_key_id, access_key_secret, region);
-    config.endpoint = Some(endpoint);
+    let mut config = config_constructor(bucket, access_key_id, secret_key, region);
+    config.endpoint = endpoint;
     Ok(config)
-}
-
-/// Load S3 (AWS) configuration
-fn load_s3_config(provider_str: &str) -> Result<StorageConfig> {
-    let is_minio = provider_str.to_lowercase() == "minio";
-
-    let bucket = if is_minio {
-        get_env_var("STORAGE_BUCKET", "MINIO_BUCKET")?
-    } else {
-        get_env_var("STORAGE_BUCKET", "AWS_S3_BUCKET")?
-    };
-
-    let access_key_id = if is_minio {
-        get_env_var("STORAGE_ACCESS_KEY_ID", "MINIO_ACCESS_KEY")?
-    } else {
-        get_env_var("STORAGE_ACCESS_KEY_ID", "AWS_ACCESS_KEY_ID")?
-    };
-
-    let secret_access_key = if is_minio {
-        get_env_var("STORAGE_ACCESS_KEY_SECRET", "MINIO_SECRET_KEY")?
-    } else {
-        get_env_var("STORAGE_ACCESS_KEY_SECRET", "AWS_SECRET_ACCESS_KEY")?
-    };
-
-    let region = env::var("STORAGE_REGION")
-        .or_else(|_| env::var("AWS_DEFAULT_REGION"))
-        .or_else(|_| env::var("MINIO_DEFAULT_REGION"))
-        .ok();
-
-    let endpoint = if is_minio {
-        Some(
-            env::var("STORAGE_ENDPOINT")
-                .or_else(|_| env::var("MINIO_ENDPOINT"))
-                .unwrap_or_else(|_| "http://localhost:9000".to_string()),
-        )
-    } else {
-        env::var("STORAGE_ENDPOINT").ok()
-    };
-
-    if is_minio {
-        let mut config = StorageConfig::s3(bucket, access_key_id, secret_access_key, region);
-        config.endpoint = endpoint;
-        Ok(config)
-    } else {
-        Ok(StorageConfig::s3(
-            bucket,
-            access_key_id,
-            secret_access_key,
-            region,
-        ))
-    }
 }
 
 /// Load filesystem configuration (for testing)
 fn load_fs_config() -> Result<StorageConfig> {
-    let root_path = env::var("STORAGE_ROOT_PATH").unwrap_or_else(|_| "./storage".to_string());
+    let root_path = env::var("STORAGE_ROOT_PATH").unwrap_or_else(|_| DEFAULT_FS_ROOT.to_string());
     Ok(StorageConfig::fs(root_path))
 }

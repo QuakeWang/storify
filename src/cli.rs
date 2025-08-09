@@ -30,17 +30,17 @@ pub struct Args {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// List directory contents (equivalent to hdfs dfs -ls)
+    /// List directory contents
     Ls(LsArgs),
-    /// Download files from remote to local (equivalent to hdfs dfs -get)
+    /// Download files from remote to local
     Get(GetArgs),
-    /// Show disk usage statistics (equivalent to hdfs dfs -du)
+    /// Show disk usage statistics
     Du(DuArgs),
-    /// Upload files from local to remote (equivalent to hdfs dfs -put)
+    /// Upload files from local to remote
     Put(PutArgs),
-    /// Remove files/directories from remote storage (equivalent to hdfs dfs -rm)
+    /// Remove files/directories from remote storage
     Rm(RmArgs),
-    /// Copy files/directories from remote to remote (equivalent to hdfs dfs -cp)
+    /// Copy files/directories from remote to remote
     Cp(CpArgs),
 }
 

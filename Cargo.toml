@@ -2,11 +2,16 @@
 name = "ossify"
 version = "0.1.0"
 edition = "2024"
+license = "Apache-2.0"
+description = "A unified command-line tool for managing object storage with HDFS-like interface"
+repository = "https://github.com/QuakeWang/ossify"
+authors = ["WangErxi"]
 
 [dependencies]
-snafu = "0.8"
-clap = { version = "4.5.42", features = ["derive", "env"] }
-opendal = { version = "0.54.0", features = ["services-oss", "services-s3", "services-fs"] }
-tokio = { version = "1.47.0", features = ["full"] }
-futures = "0.3.30"
 async-recursion = "1.0.5"
+clap = { version = "4.5.43", features = ["derive", "env"] }
+futures = "0.3.30"
+log = "0.4"
+opendal = { version = "0.54.0", features = ["services-oss", "services-s3", "services-fs"] }
+snafu = "0.8"
+tokio = { version = "1.47.1", features = ["full"] }
