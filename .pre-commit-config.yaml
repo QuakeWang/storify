@@ -1,0 +1,15 @@
+repos:
+-   repo: https://github.com/compilerla/conventional-pre-commit
+    rev: 47923ce11be4a936cd216d427d985dd342adb751
+    hooks:
+    -    id: conventional-pre-commit
+         stages: [commit-msg]
+-   repo: https://github.com/doublify/pre-commit-rust
+    rev: v1.0
+    hooks:
+    -    id: fmt
+    -    id: clippy
+         args: ["--workspace", "--all-targets", "--all-features", "--", "-D", "warnings"]
+         stages: [pre-push]
+    -    id: cargo-check
+         args: ["--workspace", "--all-targets", "--all-features"]
