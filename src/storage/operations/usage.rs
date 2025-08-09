@@ -34,32 +34,23 @@ impl UsageCalculator for OpenDalUsageCalculator {
             .try_fold((0, 0), |(size, count), entry| async move {
                 let meta = entry.metadata();
                 if !summary {
-                    println!("{} {}", format_size(meta.content_length()), entry.path());
+                    println!(
+                        "{} {}",
+                        crate::storage::utils::size::format_size(meta.content_length()),
+                        entry.path()
+                    );
                 }
                 Ok((size + meta.content_length(), count + 1))
             })
             .await?;
 
         if summary {
-            println!("{} {path}", format_size(total_size));
+            println!(
+                "{} {path}",
+                crate::storage::utils::size::format_size(total_size)
+            );
             println!("Total files: {total_files}");
         }
         Ok(())
     }
-}
-
-/// Format file size in human-readable format.
-fn format_size(size: u64) -> String {
-    const UNITS: &[&str] = &["B", "K", "M", "G", "T"];
-    const THRESHOLD: u64 = 1024;
-    if size < THRESHOLD {
-        return format!("{size}B");
-    }
-    let mut size_f = size as f64;
-    let mut unit_index = 0;
-    while size_f >= THRESHOLD as f64 && unit_index < UNITS.len() - 1 {
-        size_f /= THRESHOLD as f64;
-        unit_index += 1;
-    }
-    format!("{size_f:.1}{}", UNITS[unit_index])
 }

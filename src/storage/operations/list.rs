@@ -89,25 +89,9 @@ impl fmt::Display for FileInfo {
         let size_str = if self.is_dir {
             "-".to_string()
         } else {
-            format_size(self.size)
+            crate::storage::utils::size::format_size(self.size)
         };
         let modified = self.modified.as_deref().unwrap_or("Unknown");
         write!(f, "{file_type:<6} {size_str:>10} {modified} {}", self.path)
     }
-}
-
-/// Format file size in human-readable format.
-fn format_size(size: u64) -> String {
-    const UNITS: &[&str] = &["B", "K", "M", "G", "T"];
-    const THRESHOLD: u64 = 1024;
-    if size < THRESHOLD {
-        return format!("{size}B");
-    }
-    let mut size_f = size as f64;
-    let mut unit_index = 0;
-    while size_f >= THRESHOLD as f64 && unit_index < UNITS.len() - 1 {
-        size_f /= THRESHOLD as f64;
-        unit_index += 1;
-    }
-    format!("{size_f:.1}{}", UNITS[unit_index])
 }

@@ -202,7 +202,14 @@ impl StorageClient {
 
     pub async fn delete_files(&self, paths: &[String], recursive: bool) -> Result<()> {
         let deleter = OpenDalDeleter::new(self.operator.clone());
-        deleter.delete(paths, recursive).await
+        wrap_err!(
+            deleter.delete(paths, recursive).await,
+            DeleteFailed {
+                // summarize inputs to avoid huge error strings
+                paths: paths.iter().take(5).cloned().collect::<Vec<_>>().join(","),
+                recursive: recursive
+            }
+        )
     }
 
     pub async fn copy_files(&self, src_path: &str, dest_path: &str) -> Result<()> {

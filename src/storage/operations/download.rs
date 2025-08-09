@@ -42,7 +42,14 @@ impl Downloader for OpenDalDownloader {
         while let Some(entry) = stream.try_next().await? {
             let meta = entry.metadata();
             let remote_file_path = entry.path();
-            let relative_path = get_relative_path(remote_file_path, remote_path);
+            let mut relative_path = get_relative_path(remote_file_path, remote_path);
+            if relative_path.is_empty() {
+                // Fallback: use base name
+                relative_path = Path::new(remote_file_path)
+                    .file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default();
+            }
             let local_file_path = Path::new(local_path).join(relative_path);
 
             if meta.mode() == EntryMode::DIR {

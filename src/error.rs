@@ -9,7 +9,9 @@ pub enum Error {
     #[snafu(display("Environment variable '{key}' is required but not found"))]
     MissingEnvVar { key: String },
 
-    #[snafu(display("Unsupported storage provider: {provider}"))]
+    #[snafu(display(
+        "Unsupported storage provider: {provider}. Allowed: 'oss' | 's3' | 'minio' | 'fs'"
+    ))]
     UnsupportedProvider { provider: String },
 
     #[snafu(display("Path does not exist: {}", path.display()))]
@@ -26,6 +28,13 @@ pub enum Error {
 
     #[snafu(display("Partial deletion failure: {} path(s) failed to delete", failed_paths.len()))]
     PartialDeletion { failed_paths: Vec<String> },
+
+    #[snafu(display("Failed to delete '{paths}' (recursive: {recursive}): {source}"))]
+    DeleteFailed {
+        paths: String,
+        recursive: bool,
+        source: Box<Error>,
+    },
 
     #[snafu(display("Failed to download '{remote_path}' to '{local_path}': {source}"))]
     DownloadFailed {
