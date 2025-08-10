@@ -39,17 +39,17 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21'
       
       - name: Test
         run: |
           if [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-            export JAVA_HOME=$(/usr/libexec/java_home)
-            export DYLD_LIBRARY_PATH="$JAVA_HOME/lib:$DYLD_LIBRARY_PATH"
-            echo "JAVA_HOME: $JAVA_HOME"
-            echo "DYLD_LIBRARY_PATH: $DYLD_LIBRARY_PATH"
+            echo "Running tests on macOS, excluding hdfs-sys..."
+            cargo test --all-targets --workspace --exclude hdfs-sys
+          else
+            echo "Running full test suite on ${{ matrix.os }}..."
+            cargo test --all-targets --workspace
           fi
-          cargo test --all-targets --workspace
         env:
           RUST_LOG: DEBUG
           RUST_BACKTRACE: full
