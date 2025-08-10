@@ -33,8 +33,17 @@ jobs:
           - macos-latest
     steps:
       - uses: actions/checkout@v4
+      
+      - name: Setup Java (macOS)
+        if: matrix.os == 'macos-latest'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      
       - name: Test
         run: cargo test --all-targets --workspace
         env:
           RUST_LOG: DEBUG
           RUST_BACKTRACE: full
+          JAVA_HOME: ${{ matrix.os == 'macos-latest' && '/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home' || '' }}
