@@ -33,8 +33,7 @@ jobs:
           - macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Test on Linux
-        if: runner.os == 'Linux'
+      - name: Test
         run: cargo test --all-targets --workspace
         env:
           RUST_LOG: DEBUG
