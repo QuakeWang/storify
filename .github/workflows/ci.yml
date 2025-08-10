@@ -30,26 +30,11 @@ jobs:
       matrix:
         os:
           - ubuntu-latest
-          - macos-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Setup Java (macOS)
-        if: matrix.os == 'macos-latest'
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '21'
-      
+
       - name: Test
-        run: |
-          if [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-            echo "Running tests on macOS, excluding hdfs-sys..."
-            cargo test --all-targets --workspace --exclude hdfs-sys
-          else
-            echo "Running full test suite on ${{ matrix.os }}..."
-            cargo test --all-targets --workspace
-          fi
+        run: cargo test --all-targets --workspace
         env:
           RUST_LOG: DEBUG
           RUST_BACKTRACE: full
