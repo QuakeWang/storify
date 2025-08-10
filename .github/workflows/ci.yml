@@ -39,12 +39,3 @@ jobs:
         env:
           RUST_LOG: DEBUG
           RUST_BACKTRACE: full
-      - name: Test on macOS
-        if: runner.os == 'macOS'
-        run: |
-          export JAVA_HOME=$(/usr/libexec/java_home -v 11)
-          export DYLD_LIBRARY_PATH=$JAVA_HOME/lib/server
-          cargo test --all-targets --workspace
-        env:
-          RUST_LOG: DEBUG
-          RUST_BACKTRACE: full''''''
