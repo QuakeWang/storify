@@ -42,8 +42,14 @@ jobs:
           java-version: '17'
       
       - name: Test
-        run: cargo test --all-targets --workspace
+        run: |
+          if [[ "${{ matrix.os }}" == "macos-latest" ]]; then
+            export JAVA_HOME=$(/usr/libexec/java_home)
+            export DYLD_LIBRARY_PATH="$JAVA_HOME/lib:$DYLD_LIBRARY_PATH"
+            echo "JAVA_HOME: $JAVA_HOME"
+            echo "DYLD_LIBRARY_PATH: $DYLD_LIBRARY_PATH"
+          fi
+          cargo test --all-targets --workspace
         env:
           RUST_LOG: DEBUG
           RUST_BACKTRACE: full
-          JAVA_HOME: ${{ matrix.os == 'macos-latest' && '/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home' || '' }}
