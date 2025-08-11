@@ -7,12 +7,20 @@ description = "A unified command-line tool for managing object storage with HDFS
 repository = "https://github.com/QuakeWang/ossify"
 authors = ["WangErxi"]
 
+[features]
+# Enable common providers by default; HDFS requires JVM/Hadoop native libs at runtime
+default = ["oss", "s3", "fs"]
+oss = ["opendal/services-oss"]
+s3 = ["opendal/services-s3"]
+fs = ["opendal/services-fs"]
+hdfs = ["opendal/services-hdfs"]
+
 [dependencies]
 async-recursion = "1.0.5"
 clap = { version = "4.5.43", features = ["derive", "env"] }
 futures = "0.3.30"
 log = "0.4"
-opendal = { version = "0.54.0", features = ["services-oss", "services-s3", "services-fs", "services-hdfs"] }
+opendal = { version = "0.54.0", default-features = false }
 snafu = "0.8"
 tokio = { version = "1.47.1", features = ["full"] }
 

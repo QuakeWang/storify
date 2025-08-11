@@ -178,12 +178,22 @@ impl StorageClient {
                 Ok(Operator::new(builder)?.finish())
             }
             StorageProvider::Hdfs => {
-                let root = config.root_path.as_deref().unwrap_or("/");
-                let name_node = config.name_node.as_deref().unwrap_or_default();
-                let builder = opendal::services::Hdfs::default()
-                    .root(root)
-                    .name_node(name_node);
-                Ok(Operator::new(builder)?.finish())
+                #[cfg(feature = "hdfs")]
+                {
+                    let root = config.root_path.as_deref().unwrap_or("/");
+                    let name_node = config.name_node.as_deref().unwrap_or_default();
+                    let builder = opendal::services::Hdfs::default()
+                        .root(root)
+                        .name_node(name_node);
+                    Ok(Operator::new(builder)?.finish())
+                }
+
+                #[cfg(not(feature = "hdfs"))]
+                {
+                    return Err(Error::UnsupportedProvider {
+                        provider: "hdfs (feature disabled)".to_string(),
+                    });
+                }
             }
         }
     }

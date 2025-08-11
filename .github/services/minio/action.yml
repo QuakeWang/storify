@@ -21,7 +21,7 @@ runs:
     - name: Setup environment variables
       shell: bash
       run: |
-        cat << EOF >> $GITHUB_ENV
+        cat <<'EOF' >> "$GITHUB_ENV"
         STORAGE_PROVIDER=minio
         STORAGE_BUCKET=test
         STORAGE_ENDPOINT=http://127.0.0.1:9000
