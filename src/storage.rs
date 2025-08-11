@@ -190,9 +190,9 @@ impl StorageClient {
 
                 #[cfg(not(feature = "hdfs"))]
                 {
-                    return Err(Error::UnsupportedProvider {
+                    Err(Error::UnsupportedProvider {
                         provider: "hdfs (feature disabled)".to_string(),
-                    });
+                    })
                 }
             }
         }
