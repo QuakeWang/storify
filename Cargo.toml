@@ -15,3 +15,14 @@ log = "0.4"
 opendal = { version = "0.54.0", features = ["services-oss", "services-s3", "services-fs", "services-hdfs"] }
 snafu = "0.8"
 tokio = { version = "1.47.1", features = ["full"] }
+
+[dev-dependencies]
+libtest-mimic = "0.8.1"
+rand = "0.9.2"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter", "tracing-log"] }
+uuid = { version = "1.17.0", features = ["v4"] }
+
+[[test]]
+harness = false
+name = "behavior"
+path = "tests/behavior/main.rs"

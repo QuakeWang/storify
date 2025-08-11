@@ -1,15 +1,11 @@
 use clap::Parser;
 
-mod cli;
-mod config;
-mod error;
-mod storage;
-mod utils;
+use ossify::cli;
+use ossify::error::Result;
+use ossify::storage::StorageClient;
 
-use cli::Args;
-use config::load_storage_config;
-use error::Result;
-use storage::StorageClient;
+use ossify::cli::Args;
+use ossify::config::load_storage_config;
 
 #[tokio::main]
 async fn main() {

@@ -16,7 +16,7 @@ use self::operations::{Copier, Deleter, Downloader, Lister, Uploader, UsageCalcu
 use crate::wrap_err;
 
 /// Storage provider types
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum StorageProvider {
     Oss,
     S3,
@@ -118,9 +118,9 @@ impl StorageConfig {
 }
 
 /// Unified storage client using OpenDAL
+#[derive(Clone)]
 pub struct StorageClient {
     operator: Operator,
-    #[allow(dead_code)]
     provider: StorageProvider,
 }
 
@@ -131,6 +131,14 @@ impl StorageClient {
             operator,
             provider: config.provider,
         })
+    }
+
+    pub fn provider(&self) -> StorageProvider {
+        self.provider
+    }
+
+    pub fn operator(&self) -> &Operator {
+        &self.operator
     }
 
     fn build_operator(config: &StorageConfig) -> Result<Operator> {
@@ -181,6 +189,13 @@ impl StorageClient {
     }
 
     pub async fn list_directory(&self, path: &str, long: bool, recursive: bool) -> Result<()> {
+        log::debug!(
+            "list_directory provider={:?} path={} long={} recursive={}",
+            self.provider,
+            path,
+            long,
+            recursive
+        );
         let lister = OpenDalLister::new(self.operator.clone());
         wrap_err!(
             lister.list(path, long, recursive).await,
@@ -191,6 +206,12 @@ impl StorageClient {
     }
 
     pub async fn download_files(&self, remote_path: &str, local_path: &str) -> Result<()> {
+        log::debug!(
+            "download_files provider={:?} remote_path={} local_path={}",
+            self.provider,
+            remote_path,
+            local_path
+        );
         let downloader = OpenDalDownloader::new(self.operator.clone());
         wrap_err!(
             downloader.download(remote_path, local_path).await,
@@ -202,6 +223,12 @@ impl StorageClient {
     }
 
     pub async fn disk_usage(&self, path: &str, summary: bool) -> Result<()> {
+        log::debug!(
+            "disk_usage provider={:?} path={} summary={}",
+            self.provider,
+            path,
+            summary
+        );
         let calculator = OpenDalUsageCalculator::new(self.operator.clone());
         wrap_err!(
             calculator.calculate_usage(path, summary).await,
@@ -217,6 +244,13 @@ impl StorageClient {
         remote_path: &str,
         is_recursive: bool,
     ) -> Result<()> {
+        log::debug!(
+            "upload_files provider={:?} local_path={} remote_path={} recursive={}",
+            self.provider,
+            local_path,
+            remote_path,
+            is_recursive
+        );
         let uploader = OpenDalUploader::new(self.operator.clone());
         wrap_err!(
             uploader.upload(local_path, remote_path, is_recursive).await,
@@ -228,6 +262,12 @@ impl StorageClient {
     }
 
     pub async fn delete_files(&self, paths: &[String], recursive: bool) -> Result<()> {
+        log::debug!(
+            "delete_files provider={:?} paths_count={} recursive={}",
+            self.provider,
+            paths.len(),
+            recursive
+        );
         let deleter = OpenDalDeleter::new(self.operator.clone());
         wrap_err!(
             deleter.delete(paths, recursive).await,
@@ -240,6 +280,12 @@ impl StorageClient {
     }
 
     pub async fn copy_files(&self, src_path: &str, dest_path: &str) -> Result<()> {
+        log::debug!(
+            "copy_files provider={:?} src_path={} dest_path={}",
+            self.provider,
+            src_path,
+            dest_path
+        );
         let copier = OpenDalCopier::new(self.operator.clone());
         wrap_err!(
             copier.copy(src_path, dest_path).await,
