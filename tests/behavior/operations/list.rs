@@ -35,8 +35,7 @@ pub async fn test_list_empty_directory(client: StorageClient) -> Result<()> {
 
     assert!(
         is_empty,
-        "empty directory should have no actual content, found: {:?}",
-        entries
+        "empty directory should have no actual content, found: {entries:?}"
     );
 
     Ok(())
