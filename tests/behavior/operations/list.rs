@@ -137,7 +137,7 @@ pub async fn test_list_with_special_chars(client: StorageClient) -> Result<()> {
     ];
 
     for name in &special_names {
-        let file_path = format!("{}{}", parent, name);
+        let file_path = format!("{parent}{name}");
         let (_, content, _) = TEST_FIXTURE.new_file_with_range(&file_path, 50..200);
         client.operator().write(&file_path, content).await?;
     }
@@ -150,7 +150,7 @@ pub async fn test_list_with_special_chars(client: StorageClient) -> Result<()> {
     }
 
     for name in &special_names {
-        let expected_path = format!("{}{}", parent, name);
+        let expected_path = format!("{parent}{name}");
         assert!(
             found_files.contains(&expected_path),
             "file with special chars {name} should be found",
@@ -178,8 +178,8 @@ pub async fn test_list_invalid_path(client: StorageClient) -> Result<()> {
 
 pub async fn test_list_recursive(client: StorageClient) -> Result<()> {
     let root_dir = TEST_FIXTURE.new_dir_path();
-    let sub_dir = format!("{}subdir/", root_dir);
-    let nested_dir = format!("{}nested/", sub_dir);
+    let sub_dir = format!("{root_dir}subdir/");
+    let nested_dir = format!("{sub_dir}nested/");
 
     client.operator().create_dir(&root_dir).await?;
     client.operator().create_dir(&sub_dir).await?;

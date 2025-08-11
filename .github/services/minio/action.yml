@@ -21,11 +21,11 @@ runs:
     - name: Setup environment variables
       shell: bash
       run: |
-        cat <<'EOF' >> "$GITHUB_ENV"
-        STORAGE_PROVIDER=minio
-        STORAGE_BUCKET=test
-        STORAGE_ENDPOINT=http://127.0.0.1:9000
-        STORAGE_ACCESS_KEY_ID=minioadmin
-        STORAGE_ACCESS_KEY_SECRET=minioadmin
-        STORAGE_REGION=us-east-1
-        EOF 
+        {
+          echo "STORAGE_PROVIDER=minio";
+          echo "STORAGE_BUCKET=test";
+          echo "STORAGE_ENDPOINT=http://127.0.0.1:9000";
+          echo "STORAGE_ACCESS_KEY_ID=minioadmin";
+          echo "STORAGE_ACCESS_KEY_SECRET=minioadmin";
+          echo "STORAGE_REGION=us-east-1";
+        } >> "$GITHUB_ENV" 
