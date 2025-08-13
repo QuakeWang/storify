@@ -1,10 +1,12 @@
 use crate::error::{InvalidPathSnafu, Result};
 use crate::storage::constants::DEFAULT_CHUNK_SIZE;
-use crate::storage::utils::path::{build_remote_path, strip_prefix_safe};
+use crate::storage::utils::path::{build_remote_path, get_relative_path};
 use crate::storage::utils::progress::ConsoleProgressReporter;
 use async_recursion::async_recursion;
+use futures::stream::TryStreamExt;
 use opendal::{EntryMode, Operator};
 use snafu::ensure;
+use std::path::Path;
 
 /// Trait for copying files and directories within storage.
 pub trait Copier {
@@ -33,13 +35,20 @@ impl OpenDalCopier {
     /// Copy files recursively with directory structure preservation.
     #[async_recursion]
     async fn copy_file_recursive(&self, src_path: &str, dest_path: &str) -> Result<()> {
-        let entries = self.operator.list_with(src_path).recursive(true).await?;
-
-        for entry in &entries {
-            let meta: &opendal::Metadata = entry.metadata();
+        let lister = self.operator.lister_with(src_path).recursive(true).await?;
+        let mut stream = lister;
+        while let Some(entry) = stream.try_next().await? {
+            let meta = entry.metadata();
             let entry_path = entry.path();
-            let relative_path = strip_prefix_safe(entry_path, src_path);
-            let new_dest_path = build_remote_path(dest_path, relative_path);
+
+            let mut relative_path = get_relative_path(entry_path, src_path);
+            if relative_path.is_empty() {
+                relative_path = Path::new(entry_path)
+                    .file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default();
+            }
+            let new_dest_path = build_remote_path(dest_path, &relative_path);
 
             if meta.mode() == EntryMode::DIR {
                 self.operator.create_dir(&new_dest_path).await?;
