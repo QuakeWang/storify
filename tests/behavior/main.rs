@@ -19,6 +19,7 @@ fn main() -> Result<()> {
     let mut tests = Vec::new();
 
     operations::list::tests(&client, &mut tests);
+    operations::delete::tests(&client, &mut tests);
 
     let _ = tracing_subscriber::fmt()
         .pretty()
