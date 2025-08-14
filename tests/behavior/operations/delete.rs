@@ -73,7 +73,10 @@ async fn test_delete_non_empty_directory_recursively(client: StorageClient) -> R
     assert!(result.is_err(), "Root directory should be deleted");
 
     let file_result = client.operator().stat(&path).await;
-    assert!(file_result.is_err(), "File within directory should be deleted");
+    assert!(
+        file_result.is_err(),
+        "File within directory should be deleted"
+    );
 
     Ok(())
 }
