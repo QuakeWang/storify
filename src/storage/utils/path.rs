@@ -9,11 +9,6 @@ pub fn build_remote_path(base: &str, file_name: &str) -> String {
         .to_string()
 }
 
-/// Strip a prefix from the given path safely. Returns the original if strip fails.
-pub fn strip_prefix_safe<'a>(path: &'a str, prefix: &str) -> &'a str {
-    path.strip_prefix(prefix).unwrap_or(path)
-}
-
 /// Get relative path string between a full path and base path.
 pub fn get_relative_path(full_path: &str, base_path: &str) -> String {
     if full_path == base_path {
@@ -23,7 +18,35 @@ pub fn get_relative_path(full_path: &str, base_path: &str) -> String {
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_default();
     }
-    strip_prefix_safe(full_path, base_path)
+
+    // Strip a prefix from the given path safely
+    full_path
+        .strip_prefix(base_path)
+        .unwrap_or(full_path)
         .trim_start_matches('/')
         .to_string()
+}
+
+/// Get relative path string considering the root directory between a full path and base path.
+pub fn get_root_relative_path(full_path: &str, base_path: &str) -> String {
+    if full_path == base_path {
+        // For single-file case, return the file name to avoid empty relative path
+        return Path::new(full_path)
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+    }
+
+    let full_path = Path::new(full_path);
+    let base_path = Path::new(base_path);
+    
+    full_path
+        .strip_prefix(base_path)
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| {
+            full_path
+                    .file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default()
+        })
 }

@@ -1,12 +1,11 @@
 use crate::error::{InvalidPathSnafu, Result};
 use crate::storage::constants::DEFAULT_CHUNK_SIZE;
-use crate::storage::utils::path::{build_remote_path, get_relative_path};
+use crate::storage::utils::path::{build_remote_path, get_root_relative_path};
 use crate::storage::utils::progress::ConsoleProgressReporter;
 use async_recursion::async_recursion;
 use futures::stream::TryStreamExt;
 use opendal::{EntryMode, Operator};
 use snafu::ensure;
-use std::path::Path;
 
 /// Trait for copying files and directories within storage.
 pub trait Copier {
@@ -32,22 +31,29 @@ impl OpenDalCopier {
         Self { operator }
     }
 
+    /// Normalize path by removing leading slash if present
+    fn normalize_path(path: &str) -> &str {
+        if path.starts_with('/') {
+            &path[1..]
+        } else {
+            path
+        }
+    }
+
     /// Copy files recursively with directory structure preservation.
     #[async_recursion]
     async fn copy_file_recursive(&self, src_path: &str, dest_path: &str) -> Result<()> {
         let lister = self.operator.lister_with(src_path).recursive(true).await?;
         let mut stream = lister;
+        
         while let Some(entry) = stream.try_next().await? {
             let meta = entry.metadata();
             let entry_path = entry.path();
-
-            let mut relative_path = get_relative_path(entry_path, src_path);
-            if relative_path.is_empty() {
-                relative_path = Path::new(entry_path)
-                    .file_name()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_default();
-            }
+            
+            let normalized_entry_path = Self::normalize_path(entry_path);
+            let normalized_src_path = Self::normalize_path(src_path);
+            
+            let relative_path = get_root_relative_path(normalized_entry_path, normalized_src_path);
             let new_dest_path = build_remote_path(dest_path, &relative_path);
 
             if meta.mode() == EntryMode::DIR {
