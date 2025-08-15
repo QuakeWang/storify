@@ -1,5 +1,5 @@
 use crate::error::Result;
-use crate::storage::utils::path::get_relative_path;
+use crate::storage::utils::path::get_root_relative_path;
 use futures::stream::TryStreamExt;
 use opendal::{EntryMode, Operator};
 use std::path::Path;
@@ -42,7 +42,7 @@ impl Downloader for OpenDalDownloader {
         while let Some(entry) = stream.try_next().await? {
             let meta = entry.metadata();
             let remote_file_path = entry.path();
-            let mut relative_path = get_relative_path(remote_file_path, remote_path);
+            let mut relative_path = get_root_relative_path(remote_file_path, remote_path);
             if relative_path.is_empty() {
                 // Fallback: use base name
                 relative_path = Path::new(remote_file_path)
