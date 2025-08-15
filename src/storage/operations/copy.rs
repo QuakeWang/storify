@@ -35,12 +35,12 @@ impl OpenDalCopier {
     #[async_recursion]
     async fn copy_file_recursive(&self, src_path: &str, dest_path: &str) -> Result<()> {
         let lister = self.operator.lister_with(src_path).recursive(true).await?;
+
         let mut stream = lister;
-        
         while let Some(entry) = stream.try_next().await? {
             let meta = entry.metadata();
             let entry_path = entry.path();
-            
+
             let relative_path = get_root_relative_path(entry_path, src_path);
             let new_dest_path = build_remote_path(dest_path, &relative_path);
 
