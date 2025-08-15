@@ -31,15 +31,6 @@ impl OpenDalCopier {
         Self { operator }
     }
 
-    /// Normalize path by removing leading slash if present
-    fn normalize_path(path: &str) -> &str {
-        if path.starts_with('/') {
-            &path[1..]
-        } else {
-            path
-        }
-    }
-
     /// Copy files recursively with directory structure preservation.
     #[async_recursion]
     async fn copy_file_recursive(&self, src_path: &str, dest_path: &str) -> Result<()> {
@@ -50,10 +41,7 @@ impl OpenDalCopier {
             let meta = entry.metadata();
             let entry_path = entry.path();
             
-            let normalized_entry_path = Self::normalize_path(entry_path);
-            let normalized_src_path = Self::normalize_path(src_path);
-            
-            let relative_path = get_root_relative_path(normalized_entry_path, normalized_src_path);
+            let relative_path = get_root_relative_path(entry_path, src_path);
             let new_dest_path = build_remote_path(dest_path, &relative_path);
 
             if meta.mode() == EntryMode::DIR {

@@ -27,8 +27,20 @@ pub fn get_relative_path(full_path: &str, base_path: &str) -> String {
         .to_string()
 }
 
+/// Normalize path by removing leading slash if present
+pub fn normalize_path(path: &str) -> &str {
+    if path.starts_with('/') {
+        &path[1..]
+    } else {
+        path
+    }
+}
+
 /// Get relative path string considering the root directory between a full path and base path.
 pub fn get_root_relative_path(full_path: &str, base_path: &str) -> String {
+    let full_path = Path::new(normalize_path(full_path));
+    let base_path = Path::new(normalize_path(base_path));
+    
     if full_path == base_path {
         // For single-file case, return the file name to avoid empty relative path
         return Path::new(full_path)
@@ -37,9 +49,6 @@ pub fn get_root_relative_path(full_path: &str, base_path: &str) -> String {
             .unwrap_or_default();
     }
 
-    let full_path = Path::new(full_path);
-    let base_path = Path::new(base_path);
-    
     full_path
         .strip_prefix(base_path)
         .map(|p| p.to_string_lossy().to_string())
