@@ -74,8 +74,8 @@ pub async fn test_overwrite_existing_file(client: StorageClient) -> Result<()> {
 
 /// Upload to a non-existent subdirectory: Verify that the directory structure is created automatically.
 pub async fn test_upload_to_non_existent_subdirectory(client: StorageClient) -> Result<()> {
-    let path = format!("{}/{}/test.txt", uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
-    TEST_FIXTURE.add_path(path.clone());
+    // Create a path with a new subdirectory within the test run's unique directory.
+    let path = format!("{}sub_dir/test.txt", TEST_FIXTURE.new_dir_path());
 
     let (_, content, size) = TEST_FIXTURE.new_file_with_range(&path, 1..1024);
 

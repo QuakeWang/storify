@@ -30,7 +30,5 @@ fn main() -> Result<()> {
 
     let conclusion = libtest_mimic::run(&args, tests);
 
-    // TEST_RUNTIME.block_on(TEST_FIXTURE.cleanup(client.operator()));
-
     conclusion.exit()
 }
