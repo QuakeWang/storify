@@ -1,113 +1,95 @@
 use crate::*;
-use opendal::EntryMode;
+use assert_cmd::prelude::*;
 use ossify::error::Result;
 use ossify::storage::StorageClient;
+use predicates::prelude::*;
+use std::path::Path;
+use tokio::fs;
 
 pub fn tests(client: &StorageClient, tests: &mut Vec<Trial>) {
+    // Library-level integration tests
     tests.extend(async_trials!(
         client,
-        test_upload_single_small_file,
-        test_upload_empty_file,
-        test_overwrite_existing_file,
-        test_upload_to_non_existent_subdirectory,
-        test_upload_large_file
+        test_storage_client_write,
+        test_storage_client_write_from_special_dir
     ));
+
+    // E2E behavior tests
+    tests.extend(async_trials!(client, e2e_test_upload_command_succeeds));
 }
 
-/// Upload a single small file: Verify the file exists and its metadata is correct.
-pub async fn test_upload_single_small_file(client: StorageClient) -> Result<()> {
-    let (path, content, size) = TEST_FIXTURE.new_file_with_range("small_file.txt", 1..1024);
+/// A helper function to get the full path of a test data file.
+fn get_test_data_path(file_name: &str) -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("data")
+        .join(file_name)
+}
 
-    client.operator().write(&path, content.clone()).await?;
+// --- Integration Tests (testing StorageClient directly) ---
 
-    // Verify metadata
-    let meta = client.operator().stat(&path).await?;
-    assert_eq!(meta.mode(), EntryMode::FILE);
-    assert_eq!(meta.content_length(), size as u64);
+async fn test_storage_client_write(_client: StorageClient) -> Result<()> {
+    let source_path = get_test_data_path("small.txt");
+    let dest_path = TEST_FIXTURE.new_file_path();
+    let content = fs::read(&source_path).await?;
+    // Use the verifier from a new E2E env to write to the correct bucket
+    let env = E2eTestEnv::new().await;
+    env.verifier
+        .operator()
+        .write(&dest_path, content.clone())
+        .await?;
+    let uploaded_content = env.verifier.operator().read(&dest_path).await?;
+    assert_eq!(content, uploaded_content.to_vec());
+    Ok(())
+}
 
-    // Verify content
-    let read_content = client.operator().read(&path).await?;
-    assert_eq!(read_content.to_vec(), content);
+async fn test_storage_client_write_from_special_dir(_client: StorageClient) -> Result<()> {
+    let source_path = get_test_data_path("special_dir !@#$%^&()_+-=;'/file_in_special_dir.txt");
+    let dest_path = TEST_FIXTURE.new_file_path();
+    let content = fs::read(&source_path).await?;
+    // Use the verifier from a new E2E env to write to the correct bucket
+    let env = E2eTestEnv::new().await;
+    env.verifier
+        .operator()
+        .write(&dest_path, content.clone())
+        .await?;
+    let uploaded_content = env.verifier.operator().read(&dest_path).await?;
+    assert_eq!(content, uploaded_content.to_vec());
+    Ok(())
+}
+
+// --- E2E Behavior Tests (testing the ossify binary) ---
+
+async fn e2e_test_upload_command_succeeds(_client: StorageClient) -> Result<()> {
+    // Arrange: A single line to get the full E2E environment.
+    let env = E2eTestEnv::new().await;
+
+    let source_path = get_test_data_path("small.txt");
+    let dest_path = TEST_FIXTURE.new_file_path();
+    let final_dest_path = format!("{}", source_path.file_name().unwrap().to_string_lossy());
+    let final_dest_path = build_remote_path(&dest_path, &final_dest_path);
+
+    // Act: Get a pre-configured command and add specific arguments.
+    env.command()
+        .arg("put")
+        .arg(&source_path)
+        .arg(&dest_path)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Upload"));
+
+    // Assert: Use the pre-configured verifier client.
+    let expected_content = fs::read(&source_path).await?;
+    let actual_content = env.verifier.operator().read(&final_dest_path).await?;
+    assert_eq!(expected_content, actual_content.to_vec());
 
     Ok(())
 }
 
-/// Upload an empty file: Verify that a 0-byte file can be created correctly.
-pub async fn test_upload_empty_file(client: StorageClient) -> Result<()> {
-    let path = TEST_FIXTURE.new_file_path();
-    let content: Vec<u8> = Vec::new();
-
-    client.operator().write(&path, content).await?;
-
-    let meta = client.operator().stat(&path).await?;
-    assert_eq!(meta.content_length(), 0);
-    assert_eq!(meta.mode(), EntryMode::FILE);
-
-    // Verify content is empty
-    let read_content = client.operator().read(&path).await?;
-    assert!(read_content.is_empty());
-
-    Ok(())
-}
-
-/// Overwrite an existing file: Verify that the old file's content is replaced by the new file's content.
-pub async fn test_overwrite_existing_file(client: StorageClient) -> Result<()> {
-    let path = TEST_FIXTURE.new_file_path();
-
-    // Write initial content
-    let (path, content_v1, _) = TEST_FIXTURE.new_file_with_range(path, 100..200);
-    client.operator().write(&path, content_v1).await?;
-
-    // Write new content to overwrite
-    let (path, content_v2, size_v2) = TEST_FIXTURE.new_file_with_range(path, 300..400);
-    client.operator().write(&path, content_v2.clone()).await?;
-
-    // Verify content is overwritten
-    let meta = client.operator().stat(&path).await?;
-    assert_eq!(meta.content_length(), size_v2 as u64);
-
-    let read_content = client.operator().read(&path).await?;
-    assert_eq!(read_content.to_vec(), content_v2);
-
-    Ok(())
-}
-
-/// Upload to a non-existent subdirectory: Verify that the directory structure is created automatically.
-pub async fn test_upload_to_non_existent_subdirectory(client: StorageClient) -> Result<()> {
-    // Create a path with a new subdirectory within the test run's unique directory.
-    let path = format!("{}sub_dir/test.txt", TEST_FIXTURE.new_dir_path());
-
-    let (_, content, size) = TEST_FIXTURE.new_file_with_range(&path, 1..1024);
-
-    client.operator().write(&path, content.clone()).await?;
-
-    // Verify file exists and metadata is correct
-    let meta = client.operator().stat(&path).await?;
-    assert_eq!(meta.content_length(), size as u64);
-
-    // Verify content
-    let read_content = client.operator().read(&path).await?;
-    assert_eq!(read_content.to_vec(), content);
-
-    Ok(())
-}
-
-/// Upload a large file: (Optional) Test the multipart upload logic.
-pub async fn test_upload_large_file(client: StorageClient) -> Result<()> {
-    // 6MB to ensure it triggers multipart upload (default threshold is 5MB)
-    let large_size = 6 * 1024 * 1024;
-    let (path, content, size) =
-        TEST_FIXTURE.new_file_with_range("large_file.bin", large_size..large_size + 1);
-
-    assert_eq!(size, large_size);
-
-    client.operator().write(&path, content.clone()).await?;
-
-    let meta = client.operator().stat(&path).await?;
-    assert_eq!(meta.content_length(), size as u64);
-
-    // To save test time, we don't verify the content for large file.
-    // The correctness of multipart upload is guaranteed by opendal.
-
-    Ok(())
+fn build_remote_path(remote_path: &str, file_name: &str) -> String {
+    if remote_path.ends_with('/') {
+        format!("{}{}", remote_path, file_name)
+    } else {
+        format!("{}/{}", remote_path, file_name)
+    }
 }

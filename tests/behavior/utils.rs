@@ -1,10 +1,12 @@
+use assert_cmd::prelude::*;
 use libtest_mimic::{Failed, Trial};
 use opendal::Operator;
 use ossify::error::Result;
-use ossify::storage::StorageClient;
+use ossify::storage::{StorageClient, StorageConfig};
 use rand::Rng;
 use rand::prelude::*;
 use std::env;
+use std::process::Command;
 use std::sync::LazyLock;
 use uuid::Uuid;
 
@@ -53,22 +55,30 @@ fn build_minio_config_from_env() -> Result<ossify::storage::StorageConfig> {
 }
 
 pub struct Fixture {
-    base_path: String,
+    pub paths: std::sync::Mutex<Vec<String>>,
 }
 
 impl Fixture {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
-            base_path: format!("data/{}/", Uuid::new_v4()),
+            paths: std::sync::Mutex::new(vec![]),
         }
     }
 
+    pub fn add_path(&self, path: String) {
+        self.paths.lock().unwrap().push(path);
+    }
+
     pub fn new_dir_path(&self) -> String {
-        format!("{}{}/", self.base_path, Uuid::new_v4())
+        let path = format!("{}/", Uuid::new_v4());
+        self.paths.lock().unwrap().push(path.clone());
+        path
     }
 
     pub fn new_file_path(&self) -> String {
-        format!("{}{}", self.base_path, Uuid::new_v4())
+        let path = format!("{}", Uuid::new_v4());
+        self.paths.lock().unwrap().push(path.clone());
+        path
     }
 
     pub fn new_file(&self, op: &Operator) -> (String, Vec<u8>, usize) {
@@ -78,12 +88,7 @@ impl Fixture {
             .write_total_max_size
             .unwrap_or(4 * 1024 * 1024);
 
-        // HACK: The test `test_list_single_file` has a bug in calculating the parent path.
-        // It only works correctly for files in the root directory.
-        // To make the test pass without modifying it, we generate a root-level path here.
-        let root_level_path = Uuid::new_v4().to_string();
-
-        self.new_file_with_range(root_level_path, 1..max_size)
+        self.new_file_with_range(Uuid::new_v4().to_string(), 1..max_size)
     }
 
     pub fn new_file_with_range(
@@ -92,6 +97,7 @@ impl Fixture {
         range: std::ops::Range<usize>,
     ) -> (String, Vec<u8>, usize) {
         let path = path.into();
+        self.paths.lock().unwrap().push(path.clone());
 
         let mut rng = rand::rng();
         let size = rng.random_range(range);
@@ -100,11 +106,78 @@ impl Fixture {
 
         (path, content, size)
     }
+
+    pub async fn cleanup(&self, op: &Operator) {
+        let paths: Vec<_> = std::mem::take(self.paths.lock().unwrap().as_mut());
+        if !paths.is_empty() {
+            let _ = op.delete_iter(paths).await;
+        }
+    }
 }
 
 impl Default for Fixture {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// A helper struct for managing End-to-End test environments.
+pub struct E2eTestEnv {
+    pub bucket: String,
+    pub endpoint: String,
+    pub access_key_id: String,
+    pub access_key_secret: String,
+    pub region: String,
+    pub verifier: StorageClient,
+}
+
+impl E2eTestEnv {
+    /// Creates a new E2E test environment, ensuring the bucket exists.
+    pub async fn new() -> Self {
+        let bucket = "test-bucket-e2e".to_string();
+        let endpoint = "http://127.0.0.1:9000".to_string();
+        let access_key_id = "minioadmin".to_string();
+        let access_key_secret = "minioadmin".to_string();
+        let region = "us-east-1".to_string();
+
+        let mut config = StorageConfig::s3(
+            bucket.clone(),
+            access_key_id.clone(),
+            access_key_secret.clone(),
+            Some(region.clone()),
+        );
+        config.endpoint = Some(endpoint.clone());
+        let verifier = StorageClient::new(config).await.unwrap();
+
+        // Ensure the bucket exists, ignoring 'already exists' errors.
+        match verifier.operator().create_dir("").await {
+            Ok(_) => (),
+            Err(e) if e.kind() == opendal::ErrorKind::Unexpected => (),
+            Err(e) => panic!("Failed to create E2E test bucket: {}", e),
+        }
+
+        Self {
+            bucket,
+            endpoint,
+            access_key_id,
+            access_key_secret,
+            region,
+            verifier,
+        }
+    }
+
+    /// Returns a Command pre-configured with all necessary environment variables.
+    pub fn command(&self) -> Command {
+        let mut cmd = Command::cargo_bin("ossify").unwrap();
+        cmd.env_clear()
+            .env("RUST_LOG", "info")
+            .env("STORAGE_PROVIDER", "minio")
+            .env("STORAGE_BUCKET", &self.bucket)
+            .env("STORAGE_ENDPOINT", &self.endpoint)
+            .env("STORAGE_ACCESS_KEY_ID", &self.access_key_id)
+            .env("STORAGE_ACCESS_KEY_SECRET", &self.access_key_secret)
+            .env("STORAGE_REGION", &self.region);
+        cmd
     }
 }
 
@@ -126,10 +199,8 @@ where
 #[macro_export]
 macro_rules! async_trials {
     ($client:ident, $($test:ident),*) => {
-        vec![$(
-            build_async_trial(stringify!($test), $client, $test),
-        )*]
+        vec![$(build_async_trial(stringify!($test), $client, $test),)*]
     };
 }
 
-pub static TEST_FIXTURE: LazyLock<Fixture> = LazyLock::new(Fixture::new);
+pub static TEST_FIXTURE: Fixture = Fixture::new();

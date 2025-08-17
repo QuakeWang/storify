@@ -1,0 +1,1 @@
+content from a file in a special directory
