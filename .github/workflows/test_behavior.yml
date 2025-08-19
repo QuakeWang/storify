@@ -1,24 +1,37 @@
 name: Test Behavior
-on: [push, pull_request]
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Setup Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Setup MinIO
         uses: ./.github/services/minio
 
+      - name: Wait for MinIO readiness
+        shell: bash
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:9000/minio/health/ready >/dev/null; then
+              echo "MinIO ready"; exit 0; fi
+            sleep 1
+          done
+          echo "MinIO not ready" >&2; exit 1
+
       - name: Run Behavior Tests
-        run: cargo test --test behavior
+        run: cargo test --test behavior --quiet
         env:
           RUST_LOG: info
 
