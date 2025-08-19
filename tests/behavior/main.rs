@@ -10,11 +10,7 @@ pub use utils::*;
 fn main() -> Result<()> {
     let args = Arguments::from_args();
 
-    let client = if let Some(client) = TEST_RUNTIME.block_on(init_test_service())? {
-        client
-    } else {
-        return Ok(());
-    };
+    let client = TEST_RUNTIME.block_on(init_test_service())?;
 
     let mut tests = Vec::new();
 

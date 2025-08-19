@@ -1,6 +1,8 @@
 use crate::*;
+use assert_cmd::prelude::*;
 use ossify::error::Result;
 use ossify::storage::StorageClient;
+use predicates::prelude::*;
 
 pub fn tests(client: &StorageClient, tests: &mut Vec<Trial>) {
     tests.extend(async_trials!(
@@ -17,10 +19,13 @@ async fn test_delete_single_file(client: StorageClient) -> Result<()> {
     let (path, content, _) = TEST_FIXTURE.new_file(client.operator());
     client.operator().write(&path, content).await?;
 
-    // Act
-    client.operator().delete(&path).await?;
+    ossify_cmd()
+        .arg("rm")
+        .arg("--force")
+        .arg(&path)
+        .assert()
+        .success();
 
-    // Assert
     let result = client.operator().stat(&path).await;
     assert!(result.is_err(), "File should be deleted");
     assert!(
@@ -31,11 +36,16 @@ async fn test_delete_single_file(client: StorageClient) -> Result<()> {
     Ok(())
 }
 
-async fn test_delete_non_existent_file(client: StorageClient) -> Result<()> {
+async fn test_delete_non_existent_file(_client: StorageClient) -> Result<()> {
     let path = TEST_FIXTURE.new_file_path();
 
-    // Act & Assert: Deleting a non-existent file should not return an error.
-    client.operator().delete(&path).await?;
+    ossify_cmd()
+        .arg("rm")
+        .arg("--force")
+        .arg(&path)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Path not found"));
 
     Ok(())
 }
@@ -44,11 +54,14 @@ async fn test_delete_empty_directory(client: StorageClient) -> Result<()> {
     let dir_path = TEST_FIXTURE.new_dir_path();
     client.operator().create_dir(&dir_path).await?;
 
-    // Act
-    // Note: OpenDAL treats deleting a directory as deleting a file.
-    client.operator().delete(&dir_path).await?;
+    ossify_cmd()
+        .arg("rm")
+        .arg("-R")
+        .arg("--force")
+        .arg(&dir_path)
+        .assert()
+        .success();
 
-    // Assert
     let result = client.operator().stat(&dir_path).await;
     assert!(result.is_err(), "Directory should be deleted");
     assert!(
@@ -65,10 +78,16 @@ async fn test_delete_non_empty_directory_recursively(client: StorageClient) -> R
     let (path, content, _) = TEST_FIXTURE.new_file_with_range(file_path, 1..1024);
     client.operator().write(&path, content).await?;
 
-    // Act
-    client.operator().remove_all(&root_dir).await?;
+    E2eTestEnv::new()
+        .await
+        .command()
+        .arg("rm")
+        .arg("-R")
+        .arg("--force")
+        .arg(&root_dir)
+        .assert()
+        .success();
 
-    // Assert
     let result = client.operator().stat(&root_dir).await;
     assert!(result.is_err(), "Root directory should be deleted");
 
@@ -89,12 +108,13 @@ async fn test_delete_multiple_files_bulk(client: StorageClient) -> Result<()> {
         paths.push(path);
     }
 
-    // Act
-    for path in &paths {
-        client.operator().delete(path).await?;
+    let mut cmd = ossify_cmd();
+    cmd.arg("rm").arg("--force");
+    for p in &paths {
+        cmd.arg(p);
     }
+    cmd.assert().success();
 
-    // Assert
     for path in paths {
         let result = client.operator().stat(&path).await;
         assert!(result.is_err(), "File {path} should be deleted");

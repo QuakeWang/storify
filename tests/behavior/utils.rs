@@ -2,13 +2,20 @@ use assert_cmd::prelude::*;
 use libtest_mimic::{Failed, Trial};
 use opendal::Operator;
 use ossify::error::Result;
-use ossify::storage::{StorageClient, StorageConfig};
+use ossify::storage::StorageClient;
 use rand::Rng;
 use rand::prelude::*;
 use std::env;
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::LazyLock;
 use uuid::Uuid;
+
+const TEST_DEFAULT_BUCKET: &str = "test";
+const TEST_DEFAULT_ENDPOINT: &str = "http://127.0.0.1:9000";
+const TEST_DEFAULT_ACCESS_KEY_ID: &str = "minioadmin";
+const TEST_DEFAULT_ACCESS_KEY_SECRET: &str = "minioadmin";
+const TEST_DEFAULT_REGION: &str = "us-east-1";
 
 pub static TEST_RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
@@ -17,41 +24,99 @@ pub static TEST_RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
         .unwrap()
 });
 
-pub async fn init_test_service() -> Result<Option<StorageClient>> {
-    let provider = match env::var("STORAGE_PROVIDER") {
-        Ok(p) => p,
-        Err(_) => return Ok(None),
-    };
+// Cache MinIO config for tests to avoid repeated env reads
+static TEST_MINIO_CONFIG: LazyLock<ossify::storage::StorageConfig> =
+    LazyLock::new(|| build_minio_config_from_env().expect("minio config"));
 
-    if provider != "minio" {
-        return Ok(None);
-    }
-
+pub async fn init_test_service() -> Result<StorageClient> {
+    // This ensures behavior tests run against local MinIO without relying on global env mutation.
     let config = build_minio_config_from_env()?;
-
     let client = StorageClient::new(config).await?;
 
-    Ok(Some(client))
+    ensure_bucket_exists(client.operator()).await?;
+
+    Ok(client)
+}
+
+/// Get the absolute path to a file under `tests/data/`.
+pub fn get_test_data_path(file_name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("data")
+        .join(file_name)
 }
 
 fn build_minio_config_from_env() -> Result<ossify::storage::StorageConfig> {
-    let bucket = env::var("STORAGE_BUCKET").unwrap_or_else(|_| "test".to_string());
-    let access_key_id =
-        env::var("STORAGE_ACCESS_KEY_ID").unwrap_or_else(|_| "minioadmin".to_string());
-    let access_key_secret =
-        env::var("STORAGE_ACCESS_KEY_SECRET").unwrap_or_else(|_| "minioadmin".to_string());
+    let bucket = env::var("STORAGE_BUCKET").unwrap_or_else(|_| TEST_DEFAULT_BUCKET.to_string());
+    let access_key_id = env::var("STORAGE_ACCESS_KEY_ID")
+        .unwrap_or_else(|_| TEST_DEFAULT_ACCESS_KEY_ID.to_string());
+    let access_key_secret = env::var("STORAGE_ACCESS_KEY_SECRET")
+        .unwrap_or_else(|_| TEST_DEFAULT_ACCESS_KEY_SECRET.to_string());
     let region = env::var("STORAGE_REGION")
         .ok()
-        .unwrap_or_else(|| "us-east-1".to_string());
+        .unwrap_or_else(|| TEST_DEFAULT_REGION.to_string());
     let endpoint = env::var("STORAGE_ENDPOINT")
         .ok()
-        .unwrap_or_else(|| "http://127.0.0.1:9000".to_string());
+        .unwrap_or_else(|| TEST_DEFAULT_ENDPOINT.to_string());
 
     let mut config =
         ossify::storage::StorageConfig::s3(bucket, access_key_id, access_key_secret, Some(region));
     config.endpoint = Some(endpoint);
 
     Ok(config)
+}
+
+/// Apply MinIO config to a command as environment variables
+fn apply_minio_env<'a>(
+    cmd: &'a mut Command,
+    cfg: &ossify::storage::StorageConfig,
+) -> &'a mut Command {
+    cmd.env("STORAGE_PROVIDER", "minio")
+        .env("STORAGE_BUCKET", &cfg.bucket)
+        .env(
+            "STORAGE_ENDPOINT",
+            cfg.endpoint.as_deref().unwrap_or(TEST_DEFAULT_ENDPOINT),
+        )
+        .env(
+            "STORAGE_ACCESS_KEY_ID",
+            cfg.access_key_id
+                .as_deref()
+                .unwrap_or(TEST_DEFAULT_ACCESS_KEY_ID),
+        )
+        .env(
+            "STORAGE_ACCESS_KEY_SECRET",
+            cfg.access_key_secret
+                .as_deref()
+                .unwrap_or(TEST_DEFAULT_ACCESS_KEY_SECRET),
+        )
+        .env(
+            "STORAGE_REGION",
+            cfg.region.as_deref().unwrap_or(TEST_DEFAULT_REGION),
+        )
+}
+
+/// Create a base ossify Command with clean environment and logging configured
+fn base_cmd() -> Command {
+    let mut cmd = Command::cargo_bin("ossify").unwrap();
+    cmd.env_clear().env("RUST_LOG", "info");
+    cmd
+}
+
+/// Ensure the target bucket exists for tests. Ignores 'already exists' errors.
+pub async fn ensure_bucket_exists(op: &Operator) -> Result<()> {
+    match op.create_dir("").await {
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == opendal::ErrorKind::Unexpected => Ok(()),
+        Err(e) => Err(ossify::error::Error::from(e)),
+    }
+}
+
+pub fn join_remote_path(remote_path: &str, file_name: &str) -> String {
+    if remote_path.ends_with('/') {
+        format!("{remote_path}{file_name}")
+    } else {
+        format!("{remote_path}/{file_name}")
+    }
 }
 
 pub struct Fixture {
@@ -123,60 +188,30 @@ impl Default for Fixture {
 
 /// A helper struct for managing End-to-End test environments.
 pub struct E2eTestEnv {
-    pub bucket: String,
-    pub endpoint: String,
-    pub access_key_id: String,
-    pub access_key_secret: String,
-    pub region: String,
+    pub config: ossify::storage::StorageConfig,
     pub verifier: StorageClient,
 }
 
 impl E2eTestEnv {
-    /// Creates a new E2E test environment, ensuring the bucket exists.
     pub async fn new() -> Self {
-        let bucket = "test-bucket-e2e".to_string();
-        let endpoint = "http://127.0.0.1:9000".to_string();
-        let access_key_id = "minioadmin".to_string();
-        let access_key_secret = "minioadmin".to_string();
-        let region = "us-east-1".to_string();
-
-        let mut config = StorageConfig::s3(
-            bucket.clone(),
-            access_key_id.clone(),
-            access_key_secret.clone(),
-            Some(region.clone()),
-        );
-        config.endpoint = Some(endpoint.clone());
-        let verifier = StorageClient::new(config).await.unwrap();
-
-        // Ensure the bucket exists, ignoring 'already exists' errors.
-        match verifier.operator().create_dir("").await {
-            Ok(_) => (),
-            Err(e) if e.kind() == opendal::ErrorKind::Unexpected => (),
-            Err(e) => panic!("Failed to create E2E test bucket: {}", e),
-        }
+        let cfg = TEST_MINIO_CONFIG.clone();
+        let verifier = StorageClient::new(cfg.clone())
+            .await
+            .expect("failed to create verifier client");
+        ensure_bucket_exists(verifier.operator())
+            .await
+            .expect("Failed to create E2E test bucket");
 
         Self {
-            bucket,
-            endpoint,
-            access_key_id,
-            access_key_secret,
-            region,
+            config: cfg,
             verifier,
         }
     }
 
     /// Returns a Command pre-configured with all necessary environment variables.
     pub fn command(&self) -> Command {
-        let mut cmd = Command::cargo_bin("ossify").unwrap();
-        cmd.env_clear()
-            .env("RUST_LOG", "info")
-            .env("STORAGE_PROVIDER", "minio")
-            .env("STORAGE_BUCKET", &self.bucket)
-            .env("STORAGE_ENDPOINT", &self.endpoint)
-            .env("STORAGE_ACCESS_KEY_ID", &self.access_key_id)
-            .env("STORAGE_ACCESS_KEY_SECRET", &self.access_key_secret)
-            .env("STORAGE_REGION", &self.region);
+        let mut cmd = base_cmd();
+        apply_minio_env(&mut cmd, &self.config);
         cmd
     }
 }
@@ -204,3 +239,10 @@ macro_rules! async_trials {
 }
 
 pub static TEST_FIXTURE: Fixture = Fixture::new();
+
+pub fn ossify_cmd() -> Command {
+    let cfg = TEST_MINIO_CONFIG.clone();
+    let mut cmd = base_cmd();
+    apply_minio_env(&mut cmd, &cfg);
+    cmd
+}
