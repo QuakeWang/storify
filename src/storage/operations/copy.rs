@@ -40,15 +40,13 @@ impl OpenDalCopier {
         while let Some(entry) = stream.try_next().await? {
             let src_meta = entry.metadata();
             let entry_path = entry.path();
-
             let relative_path = get_root_relative_path(entry_path, src_path);
-            println!("relative_path: {}", relative_path);
 
             let mut new_dest_path = dest_path.to_string();
-            if let Ok(dest_meta) = self.operator.stat(dest_path).await {
-                if dest_meta.is_dir() {
-                    new_dest_path = build_remote_path(dest_path, &relative_path);
-                }
+            if let Ok(dest_meta) = self.operator.stat(dest_path).await
+                && dest_meta.is_dir()
+            {
+                new_dest_path = build_remote_path(dest_path, &relative_path);
             }
 
             if src_meta.mode() == EntryMode::DIR {
