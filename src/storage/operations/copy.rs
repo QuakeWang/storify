@@ -1,6 +1,8 @@
 use crate::error::{InvalidPathSnafu, Result};
 use crate::storage::constants::DEFAULT_CHUNK_SIZE;
-use crate::storage::utils::path::{build_remote_path, get_root_relative_path};
+use crate::storage::utils::path::{
+    basename, build_remote_path, ensure_trailing_slash, get_root_relative_path,
+};
 use crate::storage::utils::progress::ConsoleProgressReporter;
 use async_recursion::async_recursion;
 use futures::stream::TryStreamExt;
@@ -31,6 +33,30 @@ impl OpenDalCopier {
         Self { operator }
     }
 
+    /// Hybrid directory detection for object storage: stat first; if not available, probe prefix.
+    async fn is_directory(&self, path: &str) -> bool {
+        match self.operator.stat(path).await.ok().map(|m| m.mode()) {
+            Some(EntryMode::DIR) => true,
+            Some(_) => false,
+            None => {
+                let probe = ensure_trailing_slash(path);
+                self.operator
+                    .list_with(&probe)
+                    .limit(1)
+                    .await
+                    .map(|entries| !entries.is_empty())
+                    .unwrap_or(false)
+            }
+        }
+    }
+
+    /// Ensure a remote directory exists (appends trailing '/').
+    async fn ensure_directory(&self, dir_path: &str) -> Result<()> {
+        let to_create = ensure_trailing_slash(dir_path);
+        self.operator.create_dir(&to_create).await?;
+        Ok(())
+    }
+
     /// Copy files recursively with directory structure preservation.
     #[async_recursion]
     async fn copy_file_recursive(&self, src_path: &str, dest_path: &str) -> Result<()> {
@@ -38,19 +64,21 @@ impl OpenDalCopier {
 
         let mut stream = lister;
         while let Some(entry) = stream.try_next().await? {
-            let src_meta = entry.metadata();
+            let meta = entry.metadata();
             let entry_path = entry.path();
-            let relative_path = get_root_relative_path(entry_path, src_path);
 
-            let mut new_dest_path = dest_path.to_string();
-            if let Ok(dest_meta) = self.operator.stat(dest_path).await
-                && dest_meta.is_dir()
-            {
-                new_dest_path = build_remote_path(dest_path, &relative_path);
+            // Skip creating the root directory itself; caller ensured destination root exists
+            let src_norm = src_path.trim_start_matches('/');
+            let entry_norm = entry_path.trim_start_matches('/');
+            if meta.mode() == EntryMode::DIR && entry_norm == src_norm {
+                continue;
             }
 
-            if src_meta.mode() == EntryMode::DIR {
-                self.operator.create_dir(&new_dest_path).await?;
+            let relative_path = get_root_relative_path(entry_path, src_path);
+            let new_dest_path = build_remote_path(dest_path, &relative_path);
+
+            if meta.mode() == EntryMode::DIR {
+                self.ensure_directory(&new_dest_path).await?;
             } else {
                 self.stream_copy(entry_path, &new_dest_path).await?;
             }
@@ -103,23 +131,47 @@ impl OpenDalCopier {
 
 impl Copier for OpenDalCopier {
     async fn copy(&self, src_path: &str, dest_path: &str) -> Result<()> {
-        match self.operator.list_with(src_path).limit(1).await {
-            Ok(entries) if !entries.is_empty() => {
-                self.copy_file_recursive(src_path, dest_path).await?;
-                Ok(())
+        let src_stat = self.operator.stat(src_path).await.ok();
+        let src_is_dir = self.is_directory(src_path).await;
+        ensure!(
+            src_stat.is_some() || src_is_dir,
+            InvalidPathSnafu {
+                path: src_path.to_string()
             }
-            Ok(_) => {
-                ensure!(
-                    self.operator.exists(src_path).await?,
-                    InvalidPathSnafu {
-                        path: src_path.to_string(),
-                    }
-                );
-                Ok(())
+        );
+
+        if src_is_dir {
+            let target_root = if self.is_directory(dest_path).await {
+                let base_name = basename(src_path);
+                let target_root = build_remote_path(dest_path, &base_name);
+                self.ensure_directory(&target_root).await?;
+                target_root
+            } else {
+                self.ensure_directory(dest_path).await?;
+                dest_path.to_string()
+            };
+
+            self.copy_file_recursive(src_path, &target_root).await?;
+            Ok(())
+        } else {
+            let dest_is_dir_hint = dest_path.ends_with('/');
+            let dest_is_dir = self.is_directory(dest_path).await;
+
+            if dest_is_dir_hint && !dest_is_dir {
+                return Err(crate::error::Error::InvalidPath {
+                    path: dest_path.to_string(),
+                });
             }
-            Err(_) => Err(crate::error::Error::InvalidPath {
-                path: src_path.to_string(),
-            }),
+
+            let final_dest = if dest_is_dir_hint || dest_is_dir {
+                let file_name = basename(src_path);
+                build_remote_path(dest_path, &file_name)
+            } else {
+                dest_path.to_string()
+            };
+
+            self.stream_copy(src_path, &final_dest).await?;
+            Ok(())
         }
     }
 }
