@@ -15,11 +15,10 @@ pub fn tests(client: &StorageClient, tests: &mut Vec<Trial>) {
 }
 
 async fn test_download_directory(_client: StorageClient) -> Result<()> {
-    let source_dir = get_test_data_path("upload_dir");
+    let source_dir = get_test_data_path("special_dir !@#$%^&()_+-=;'");
     let remote_dir = TEST_FIXTURE.new_dir_path();
     let local_dest_dir = get_test_data_path("download").join("downloaded_dir");
 
-    // 1. Upload the directory
     ossify_cmd()
         .arg("put")
         .arg("-R")
@@ -28,7 +27,6 @@ async fn test_download_directory(_client: StorageClient) -> Result<()> {
         .assert()
         .success();
 
-    // 2. Download the directory
     ossify_cmd()
         .arg("get")
         .arg(&remote_dir)
@@ -36,14 +34,12 @@ async fn test_download_directory(_client: StorageClient) -> Result<()> {
         .assert()
         .success();
 
-    // 3. Verify the content
     let mut source_entries = get_dir_entries(&source_dir, &source_dir)?;
     let mut dest_entries = get_dir_entries(&local_dest_dir, &local_dest_dir)?;
     source_entries.sort_by(|a, b| a.0.cmp(&b.0));
     dest_entries.sort_by(|a, b| a.0.cmp(&b.0));
     assert_eq!(source_entries, dest_entries);
 
-    // 4. Cleanup
     fs::remove_dir_all(&local_dest_dir)?;
 
     Ok(())
