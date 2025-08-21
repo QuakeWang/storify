@@ -15,6 +15,7 @@ fn main() -> Result<()> {
     let mut tests = Vec::new();
 
     operations::list::tests(&client, &mut tests);
+    operations::copy::tests(&client, &mut tests);
     operations::delete::tests(&client, &mut tests);
     operations::upload::tests(&client, &mut tests);
 
