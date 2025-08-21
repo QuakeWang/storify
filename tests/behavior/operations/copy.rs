@@ -16,32 +16,22 @@ pub fn tests(client: &StorageClient, tests: &mut Vec<Trial>) {
 }
 
 async fn test_copy_some_directory(client: StorageClient) -> Result<()> {
-    let (src_file_path, content, _) = TEST_FIXTURE.new_file(client.operator());
-    client
-        .operator()
-        .write(&src_file_path, content.clone())
-        .await?;
+    let (src_file, content, _) = TEST_FIXTURE.new_file(client.operator());
 
-    let dest_path = TEST_FIXTURE.new_dir_path();
-    client.operator().create_dir(&dest_path).await?;
+    let src_path = TEST_FIXTURE.new_dir_path();
+    client.operator().create_dir(&src_path).await?;
 
-    let final_dest_path = format!(
-        "{}",
-        Path::new(&src_file_path)
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-    );
-    let final_dest_path = join_remote_path(&dest_path, &final_dest_path);
+    let src_file_path = format!("{}{}", src_path, src_file);
+    client.operator().write(&src_file_path, content.clone()).await?;
 
     ossify_cmd()
         .arg("cp")
         .arg(&src_file_path)
-        .arg(&dest_path)
+        .arg(&src_path)
         .assert()
         .success();
 
-    let dst_content = client.operator().read(&final_dest_path).await?;
+    let dst_content = client.operator().read(&src_file_path).await?;
     assert_eq!(content, dst_content.to_vec());
 
     Ok(())
