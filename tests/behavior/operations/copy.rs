@@ -8,14 +8,14 @@ use std::path::Path;
 pub fn tests(client: &StorageClient, tests: &mut Vec<Trial>) {
     tests.extend(async_trials!(
         client,
-        test_copy_some_directory,
+        test_copy_same_directory,
         test_copy_across_directory,
         test_copy_overwrite_existing_file,
         test_copy_non_existent_file
     ));
 }
 
-async fn test_copy_some_directory(client: StorageClient) -> Result<()> {
+async fn test_copy_same_directory(client: StorageClient) -> Result<()> {
     let (src_file, content, _) = TEST_FIXTURE.new_file(client.operator());
 
     let src_path = TEST_FIXTURE.new_dir_path();
