@@ -22,7 +22,10 @@ async fn test_copy_some_directory(client: StorageClient) -> Result<()> {
     client.operator().create_dir(&src_path).await?;
 
     let src_file_path = format!("{}{}", src_path, src_file);
-    client.operator().write(&src_file_path, content.clone()).await?;
+    client
+        .operator()
+        .write(&src_file_path, content.clone())
+        .await?;
 
     ossify_cmd()
         .arg("cp")
