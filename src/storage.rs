@@ -10,9 +10,10 @@ use self::operations::copy::OpenDalCopier;
 use self::operations::delete::OpenDalDeleter;
 use self::operations::download::OpenDalDownloader;
 use self::operations::list::OpenDalLister;
+use self::operations::mkdir::OpenDalMkdirer;
 use self::operations::upload::OpenDalUploader;
 use self::operations::usage::OpenDalUsageCalculator;
-use self::operations::{Copier, Deleter, Downloader, Lister, Uploader, UsageCalculator};
+use self::operations::{Copier, Deleter, Downloader, Lister, Mkdirer, Uploader, UsageCalculator};
 use crate::wrap_err;
 
 /// Storage provider types
@@ -302,6 +303,22 @@ impl StorageClient {
             CopyFailed {
                 src_path: src_path.to_string(),
                 dest_path: dest_path.to_string()
+            }
+        )
+    }
+
+    pub async fn create_directory(&self, path: &str, parents: bool) -> Result<()> {
+        log::debug!(
+            "create_directory provider={:?} path={} parents={}",
+            self.provider,
+            path,
+            parents
+        );
+        let mkdirer = OpenDalMkdirer::new(self.operator.clone());
+        wrap_err!(
+            mkdirer.mkdir(path, parents).await,
+            DirectoryCreationFailed {
+                path: path.to_string()
             }
         )
     }

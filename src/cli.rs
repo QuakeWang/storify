@@ -42,6 +42,8 @@ pub enum Commands {
     Rm(RmArgs),
     /// Copy files/directories from remote to remote
     Cp(CpArgs),
+    /// Create directories in remote storage
+    Mkdir(MkdirArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -122,6 +124,17 @@ pub struct CpArgs {
     pub dest_path: String,
 }
 
+#[derive(Parser, Debug)]
+pub struct MkdirArgs {
+    /// The directory path to create
+    #[arg(value_name = "PATH", value_parser = parse_validated_path)]
+    pub path: String,
+
+    /// Create parent directories as needed
+    #[arg(short, long)]
+    pub parents: bool,
+}
+
 pub async fn run(args: Args, client: StorageClient) -> Result<()> {
     match args.command {
         Commands::Ls(ls_args) => {
@@ -154,6 +167,11 @@ pub async fn run(args: Args, client: StorageClient) -> Result<()> {
         Commands::Cp(cp_args) => {
             client
                 .copy_files(&cp_args.src_path, &cp_args.dest_path)
+                .await?;
+        }
+        Commands::Mkdir(mkdir_args) => {
+            client
+                .create_directory(&mkdir_args.path, mkdir_args.parents)
                 .await?;
         }
     }

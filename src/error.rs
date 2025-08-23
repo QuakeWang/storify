@@ -63,6 +63,9 @@ pub enum Error {
     #[snafu(display("Failed to get disk usage for '{path}': {source}"))]
     DiskUsageFailed { path: String, source: Box<Error> },
 
+    #[snafu(display("Failed to create directory '{path}': {source}"))]
+    DirectoryCreationFailed { path: String, source: Box<Error> },
+
     #[snafu(display("OpenDAL error: {source}"))]
     OpenDal { source: opendal::Error },
 

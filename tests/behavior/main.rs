@@ -17,6 +17,7 @@ fn main() -> Result<()> {
     operations::list::tests(&client, &mut tests);
     operations::delete::tests(&client, &mut tests);
     operations::download::tests(&client, &mut tests);
+    operations::mkdir::tests(&client, &mut tests);
     operations::upload::tests(&client, &mut tests);
 
     let _ = tracing_subscriber::fmt()
