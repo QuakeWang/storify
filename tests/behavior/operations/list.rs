@@ -2,9 +2,9 @@ use crate::*;
 use assert_cmd::prelude::*;
 use futures::TryStreamExt;
 use opendal::EntryMode;
-use ossify::error::Result;
-use ossify::storage::StorageClient;
 use predicates::prelude::*;
+use storify::error::Result;
+use storify::storage::StorageClient;
 use uuid::Uuid;
 
 pub fn tests(client: &StorageClient, tests: &mut Vec<Trial>) {
@@ -25,7 +25,7 @@ pub async fn test_list_empty_directory(client: StorageClient) -> Result<()> {
 
     client.operator().create_dir(&dir_path).await?;
 
-    ossify_cmd().arg("ls").arg(&dir_path).assert().success();
+    storify_cmd().arg("ls").arg(&dir_path).assert().success();
 
     let mut obs = client.operator().lister(&dir_path).await?;
     let mut entries = Vec::new();
@@ -58,7 +58,7 @@ pub async fn test_list_single_file(client: StorageClient) -> Result<()> {
     } else {
         parent_path
     };
-    ossify_cmd()
+    storify_cmd()
         .arg("ls")
         .arg(cli_path)
         .assert()
@@ -83,7 +83,7 @@ pub async fn test_list_multiple_files(client: StorageClient) -> Result<()> {
         expected_files.push(file_path);
     }
 
-    let mut assert = ossify_cmd();
+    let mut assert = storify_cmd();
     assert.arg("ls").arg(&parent);
     let mut a = assert.assert();
     a = a.success();
@@ -107,7 +107,7 @@ pub async fn test_list_nested_directories(client: StorageClient) -> Result<()> {
     let (_, content, _) = TEST_FIXTURE.new_file_with_range(&file_path, 100..500);
     client.operator().write(&file_path, content).await?;
 
-    ossify_cmd()
+    storify_cmd()
         .arg("ls")
         .arg(&root_dir)
         .assert()
@@ -136,7 +136,7 @@ pub async fn test_list_with_special_chars(client: StorageClient) -> Result<()> {
         client.operator().write(&file_path, content).await?;
     }
 
-    let mut assert = ossify_cmd();
+    let mut assert = storify_cmd();
     assert.arg("ls").arg(&parent);
     let mut a = assert.assert();
     a = a.success();
@@ -151,7 +151,11 @@ pub async fn test_list_with_special_chars(client: StorageClient) -> Result<()> {
 pub async fn test_list_invalid_path(client: StorageClient) -> Result<()> {
     let invalid_path = format!("{}/non_existent_dir/", Uuid::new_v4());
 
-    ossify_cmd().arg("ls").arg(&invalid_path).assert().success();
+    storify_cmd()
+        .arg("ls")
+        .arg(&invalid_path)
+        .assert()
+        .success();
 
     if let Ok(mut obs) = client.operator().lister(&invalid_path).await {
         let mut count = 0;
@@ -182,7 +186,7 @@ pub async fn test_list_recursive(client: StorageClient) -> Result<()> {
         client.operator().write(file_path, content).await?;
     }
 
-    ossify_cmd()
+    storify_cmd()
         .arg("ls")
         .arg("-R")
         .arg(&root_dir)

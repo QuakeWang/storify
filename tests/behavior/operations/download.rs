@@ -1,8 +1,8 @@
 use crate::*;
 use assert_cmd::prelude::*;
-use ossify::error::Result;
-use ossify::storage::StorageClient;
 use predicates::prelude::*;
+use storify::error::Result;
+use storify::storage::StorageClient;
 use tokio::fs;
 use uuid::Uuid;
 
@@ -94,9 +94,9 @@ async fn stage_special_char_file(client: &StorageClient) -> Result<StagedFile> {
 
 async fn test_download_existing_file_to_directory(client: StorageClient) -> Result<()> {
     let staged_file = stage_remote_file(&client).await?;
-    let local_dir = std::env::temp_dir().join(format!("ossify-dl-{}", Uuid::new_v4()));
+    let local_dir = std::env::temp_dir().join(format!("storify-dl-{}", Uuid::new_v4()));
 
-    ossify_cmd()
+    storify_cmd()
         .arg("get")
         .arg(&staged_file.remote_path)
         .arg(&local_dir)
@@ -114,9 +114,9 @@ async fn test_download_existing_file_to_directory(client: StorageClient) -> Resu
 
 async fn test_download_directory_recursive(client: StorageClient) -> Result<()> {
     let (remote_dir, expected_content) = stage_remote_directory(&client).await?;
-    let local_dest = std::env::temp_dir().join(format!("ossify-dl-dir-{}", Uuid::new_v4()));
+    let local_dest = std::env::temp_dir().join(format!("storify-dl-dir-{}", Uuid::new_v4()));
 
-    ossify_cmd()
+    storify_cmd()
         .arg("get")
         .arg(&remote_dir)
         .arg(&local_dest)
@@ -133,9 +133,9 @@ async fn test_download_directory_recursive(client: StorageClient) -> Result<()> 
 
 async fn test_download_non_existent_file(_client: StorageClient) -> Result<()> {
     let remote_path = TEST_FIXTURE.new_file_path();
-    let local_dir = std::env::temp_dir().join(format!("ossify-dl-miss-{}", Uuid::new_v4()));
+    let local_dir = std::env::temp_dir().join(format!("storify-dl-miss-{}", Uuid::new_v4()));
 
-    ossify_cmd()
+    storify_cmd()
         .arg("get")
         .arg(&remote_path)
         .arg(&local_dir)
@@ -149,9 +149,9 @@ async fn test_download_non_existent_file(_client: StorageClient) -> Result<()> {
 
 async fn test_download_large_file(client: StorageClient) -> Result<()> {
     let staged_file = stage_large_file(&client).await?;
-    let local_dir = std::env::temp_dir().join(format!("ossify-dl-large-{}", Uuid::new_v4()));
+    let local_dir = std::env::temp_dir().join(format!("storify-dl-large-{}", Uuid::new_v4()));
 
-    ossify_cmd()
+    storify_cmd()
         .arg("get")
         .arg(&staged_file.remote_path)
         .arg(&local_dir)
@@ -170,9 +170,9 @@ async fn test_download_large_file(client: StorageClient) -> Result<()> {
 
 async fn test_download_with_special_chars(client: StorageClient) -> Result<()> {
     let staged_file = stage_special_char_file(&client).await?;
-    let local_dir = std::env::temp_dir().join(format!("ossify-dl-special-{}", Uuid::new_v4()));
+    let local_dir = std::env::temp_dir().join(format!("storify-dl-special-{}", Uuid::new_v4()));
 
-    ossify_cmd()
+    storify_cmd()
         .arg("get")
         .arg(&staged_file.remote_path)
         .arg(&local_dir)

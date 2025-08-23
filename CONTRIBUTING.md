@@ -1,12 +1,12 @@
 # Welcome 👋
 
-Thanks a lot for considering contributing to ossify. We believe people like you would make ossify a great tool for unified object storage management. We intend to build a community where individuals can have open talks, show respect for one another, and speak with true ❤️. Meanwhile, we are to keep transparency and make your effort count here.
+Thanks a lot for considering contributing to storify. We believe people like you would make storify a great tool for unified object storage management. We intend to build a community where individuals can have open talks, show respect for one another, and speak with true ❤️. Meanwhile, we are to keep transparency and make your effort count here.
 
-You can find our contributors at [contributors](https://github.com/QuakeWang/ossify/graphs/contributors). When you dedicate to ossify for a few months and keep bringing high-quality contributions (code, docs, advocate, etc.), you will be a candidate of a committer.
+You can find our contributors at [contributors](https://github.com/QuakeWang/storify/graphs/contributors). When you dedicate to storify for a few months and keep bringing high-quality contributions (code, docs, advocate, etc.), you will be a candidate of a committer.
 
 Please read the guidelines, and they can help you get started. Communicate respectfully with the developers maintaining and developing the project. In return, they should reciprocate that respect by addressing your issue, reviewing changes, as well as helping finalize and merge your pull requests.
 
-Follow our [README](https://github.com/QuakeWang/ossify#readme) to get the whole picture of the project.
+Follow our [README](https://github.com/QuakeWang/storify#readme) to get the whole picture of the project.
 
 ## Your First Contribution
 
@@ -19,12 +19,12 @@ It can feel intimidating to contribute to a complex project, but it can also be 
 
 Pull requests are great, but we accept all kinds of other help if you like. Such as
 
-- Improve the documentation. [Submit documentation](https://github.com/QuakeWang/ossify/tree/main/docs) updates, enhancements, designs, or bug fixes, and fixing any spelling or grammar errors will be very much appreciated.
-- Submitting bug reports. To report a bug or a security issue, you can [open a new GitHub issue](https://github.com/QuakeWang/ossify/issues/new).
+- Improve the documentation. [Submit documentation](https://github.com/QuakeWang/storify/tree/main/docs) updates, enhancements, designs, or bug fixes, and fixing any spelling or grammar errors will be very much appreciated.
+- Submitting bug reports. To report a bug or a security issue, you can [open a new GitHub issue](https://github.com/QuakeWang/storify/issues/new).
 
 ## License
 
-ossify uses the [Apache 2.0 license](https://github.com/QuakeWang/ossify/blob/main/LICENSE) to strike a balance between open contributions and allowing you to use the software however you want.
+storify uses the [Apache 2.0 license](https://github.com/QuakeWang/storify/blob/main/LICENSE) to strike a balance between open contributions and allowing you to use the software however you want.
 
 ## Getting Started
 
@@ -32,7 +32,7 @@ ossify uses the [Apache 2.0 license](https://github.com/QuakeWang/ossify/blob/ma
 
 - Check if an issue already exists. Before filing an issue report, see whether it's already covered. Use the search bar and check out existing issues.
 - File an issue:
-  - To report a bug, a security issue, or anything that you think is a problem and that isn't under the radar, go ahead and [open a new GitHub issue](https://github.com/QuakeWang/ossify/issues/new).
+  - To report a bug, a security issue, or anything that you think is a problem and that isn't under the radar, go ahead and [open a new GitHub issue](https://github.com/QuakeWang/storify/issues/new).
   - In the given templates, look for the one that suits you.
 - What happens after:
   - Once we spot a new issue, we identify and categorize it as soon as possible.
@@ -98,8 +98,8 @@ All commit messages SHOULD adhere to the [Conventional Commits specification](ht
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/QuakeWang/ossify.git
-   cd ossify
+   git clone https://github.com/QuakeWang/storify.git
+   cd storify
    ```
 
 2. Install dependencies:
@@ -144,6 +144,14 @@ export STORAGE_BUCKET=your-bucket
 export STORAGE_ACCESS_KEY_ID=your-key
 export STORAGE_ACCESS_KEY_SECRET=your-secret
 
+# MinIO (for local testing)
+export STORAGE_PROVIDER=minio
+export STORAGE_BUCKET=test
+export STORAGE_ENDPOINT=http://127.0.0.1:9000
+export STORAGE_ACCESS_KEY_ID=minioadmin
+export STORAGE_ACCESS_KEY_SECRET=minioadmin
+export STORAGE_REGION=us-east-1
+
 # Local filesystem (for testing)
 export STORAGE_PROVIDER=fs
 export STORAGE_ROOT_PATH=./test-storage
@@ -152,7 +160,7 @@ export STORAGE_ROOT_PATH=./test-storage
 ## Project Structure
 
 ```
-ossify/
+storify/
 ├── src/
 │   ├── cli.rs          # Command-line interface
 │   ├── config.rs       # Configuration management
@@ -162,9 +170,12 @@ ossify/
 │   │   └── utils/      # Storage utilities
 │   └── utils.rs        # General utilities
 ├── tests/
-│   └── behavior/       # Behavior tests
-├── docs/               # Documentation
-└── examples/           # Usage examples
+│   ├── behavior/       # Behavior tests
+│   └── data/           # Test data files
+├── .github/
+│   ├── workflows/      # CI/CD workflows
+│   └── services/       # GitHub Actions services
+└── docs/               # Documentation (future)
 ```
 
 ## Contributing Guidelines
@@ -189,6 +200,7 @@ ossify/
 - Add behavior tests for CLI commands
 - Test with multiple storage providers when applicable
 - Ensure backward compatibility
+- Add unit tests for new functionality
 
 ### Documentation
 
@@ -197,10 +209,40 @@ ossify/
 - Update .env.example for new environment variables
 - Document breaking changes clearly
 
+### Performance
+
+- Consider performance implications of changes
+- Use async operations where appropriate
+- Avoid blocking operations in async contexts
+- Profile code for performance bottlenecks
+
+### Security
+
+- Never log sensitive information (keys, tokens, etc.)
+- Validate all user inputs
+- Use secure defaults
+- Follow security best practices
+
 ## Communication
 
 - GitHub Issues: For bug reports and feature requests
 - GitHub Discussions: For general questions and discussions
 - Pull Requests: For code contributions
 
-Thank you for contributing to ossify! 🚀
+## Development Workflow
+
+1. **Fork the repository** on GitHub
+2. **Create a feature branch** from `main`
+3. **Make your changes** following the coding guidelines
+4. **Add tests** for new functionality
+5. **Run the test suite** to ensure everything works
+6. **Submit a pull request** with a clear description
+
+## Review Process
+
+- All PRs require at least one review
+- CI checks must pass before merging
+- Code coverage should not decrease significantly
+- Breaking changes require additional discussion
+
+Thank you for contributing to storify! 🚀

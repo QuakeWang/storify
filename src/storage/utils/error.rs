@@ -2,23 +2,23 @@
 use crate::error::Error;
 
 /// Convert different error types into our unified Error type.
-pub trait IntoOssifyError {
+pub trait IntoStorifyError {
     fn into_error(self) -> Error;
 }
 
-impl IntoOssifyError for Error {
+impl IntoStorifyError for Error {
     fn into_error(self) -> Error {
         self
     }
 }
 
-impl IntoOssifyError for opendal::Error {
+impl IntoStorifyError for opendal::Error {
     fn into_error(self) -> Error {
         self.into()
     }
 }
 
-impl IntoOssifyError for std::io::Error {
+impl IntoStorifyError for std::io::Error {
     fn into_error(self) -> Error {
         self.into()
     }
@@ -31,7 +31,7 @@ impl IntoOssifyError for std::io::Error {
 macro_rules! wrap_err {
     ($expr:expr, $variant:ident { $($field:ident : $value:expr),* $(,)? }) => {{
         $expr.map_err(|e| {
-            let src: $crate::error::Error = $crate::storage::utils::error::IntoOssifyError::into_error(e);
+            let src: $crate::error::Error = $crate::storage::utils::error::IntoStorifyError::into_error(e);
             $crate::error::Error::$variant { $($field: $value),*, source: Box::new(src) }
         })
     }};

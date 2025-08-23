@@ -1,6 +1,6 @@
 use libtest_mimic::Arguments;
 use libtest_mimic::Trial;
-use ossify::error::Result;
+use storify::error::Result;
 
 mod operations;
 mod utils;

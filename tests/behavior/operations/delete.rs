@@ -1,8 +1,8 @@
 use crate::*;
 use assert_cmd::prelude::*;
-use ossify::error::Result;
-use ossify::storage::StorageClient;
 use predicates::prelude::*;
+use storify::error::Result;
+use storify::storage::StorageClient;
 
 pub fn tests(client: &StorageClient, tests: &mut Vec<Trial>) {
     tests.extend(async_trials!(
@@ -19,7 +19,7 @@ async fn test_delete_single_file(client: StorageClient) -> Result<()> {
     let (path, content, _) = TEST_FIXTURE.new_file(client.operator());
     client.operator().write(&path, content).await?;
 
-    ossify_cmd()
+    storify_cmd()
         .arg("rm")
         .arg("--force")
         .arg(&path)
@@ -39,7 +39,7 @@ async fn test_delete_single_file(client: StorageClient) -> Result<()> {
 async fn test_delete_non_existent_file(_client: StorageClient) -> Result<()> {
     let path = TEST_FIXTURE.new_file_path();
 
-    ossify_cmd()
+    storify_cmd()
         .arg("rm")
         .arg("--force")
         .arg(&path)
@@ -54,7 +54,7 @@ async fn test_delete_empty_directory(client: StorageClient) -> Result<()> {
     let dir_path = TEST_FIXTURE.new_dir_path();
     client.operator().create_dir(&dir_path).await?;
 
-    ossify_cmd()
+    storify_cmd()
         .arg("rm")
         .arg("-R")
         .arg("--force")
@@ -108,7 +108,7 @@ async fn test_delete_multiple_files_bulk(client: StorageClient) -> Result<()> {
         paths.push(path);
     }
 
-    let mut cmd = ossify_cmd();
+    let mut cmd = storify_cmd();
     cmd.arg("rm").arg("--force");
     for p in &paths {
         cmd.arg(p);
