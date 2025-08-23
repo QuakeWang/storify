@@ -1,0 +1,24 @@
+# Development files
+.env.example
+.github/
+.pre-commit-config.yaml
+.yamlfmt
+rust-toolchain.toml
+rustfmt.toml
+
+# Test files
+tests/
+target/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
