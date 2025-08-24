@@ -26,10 +26,8 @@ async fn test_create_single_directory(_client: StorageClient) -> Result<()> {
         .success()
         .stdout(predicate::str::contains("Created directory:"));
 
-    // Verify directory exists by listing it
     let _list_result = storify_cmd().arg("ls").arg(&dir_name).assert().success();
 
-    // Clean up
     let _ = storify_cmd().arg("rm").arg("-R").arg(&dir_name).output();
 
     Ok(())
@@ -47,10 +45,8 @@ async fn test_create_directory_with_parents(_client: StorageClient) -> Result<()
         .success()
         .stdout(predicate::str::contains("Created directory:"));
 
-    // Verify all directories exist
     let _list_result = storify_cmd().arg("ls").arg(&parent_dir).assert().success();
 
-    // Clean up
     let _ = storify_cmd().arg("rm").arg("-R").arg(&parent_dir).output();
 
     Ok(())
@@ -70,7 +66,6 @@ async fn test_create_root_directory(_client: StorageClient) -> Result<()> {
 async fn test_create_existing_directory(_client: StorageClient) -> Result<()> {
     let dir_name = format!("existing-dir-{}", Uuid::new_v4());
 
-    // Create directory first time
     storify_cmd()
         .arg("mkdir")
         .arg(&dir_name)
@@ -78,9 +73,6 @@ async fn test_create_existing_directory(_client: StorageClient) -> Result<()> {
         .success()
         .stdout(predicate::str::contains("Created directory:"));
 
-    // Try to create the same directory again
-    // In object storage, this might succeed again or show "already exists"
-    // Both behaviors are acceptable
     let result = storify_cmd()
         .arg("mkdir")
         .arg(&dir_name)
@@ -89,7 +81,6 @@ async fn test_create_existing_directory(_client: StorageClient) -> Result<()> {
 
     assert!(result.status.success(), "Second mkdir should succeed");
 
-    // Clean up
     let _ = storify_cmd().arg("rm").arg("-R").arg(&dir_name).output();
 
     Ok(())
@@ -107,10 +98,8 @@ async fn test_create_nested_directories(_client: StorageClient) -> Result<()> {
         .success()
         .stdout(predicate::str::contains("Created directory:"));
 
-    // Verify the deepest directory exists
     let _list_result = storify_cmd().arg("ls").arg(&nested_path).assert().success();
 
-    // Clean up
     let _ = storify_cmd().arg("rm").arg("-R").arg(&base_dir).output();
 
     Ok(())
