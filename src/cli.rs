@@ -15,7 +15,7 @@ fn parse_validated_path(path_str: &str) -> Result<String> {
     }
 }
 
-/// Ossify - A unified tool for managing object storage with HDFS-like interface
+/// Storify - A unified tool for managing object storage with HDFS-like interface
 #[derive(Parser, Debug)]
 #[command(
     version = "0.1.0",

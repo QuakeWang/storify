@@ -1,11 +1,11 @@
 use clap::Parser;
 
-use ossify::cli;
-use ossify::error::Result;
-use ossify::storage::StorageClient;
+use storify::cli;
+use storify::error::Result;
+use storify::storage::StorageClient;
 
-use ossify::cli::Args;
-use ossify::config::load_storage_config;
+use storify::cli::Args;
+use storify::config::load_storage_config;
 
 #[tokio::main]
 async fn main() {

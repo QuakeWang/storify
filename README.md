@@ -1,4 +1,4 @@
-# Ossify
+# Storify
 
 A unified command-line tool for managing object storage with HDFS-like interface.
 
@@ -8,18 +8,29 @@ A unified command-line tool for managing object storage with HDFS-like interface
 - **HDFS-compatible commands**: Familiar interface for Hadoop users
 - **Unified configuration**: Single tool for all storage providers
 - **High performance**: Async I/O with progress reporting
+- **Cross-platform**: Works on Linux, macOS, and Windows
 
 ## Installation
 
+### From Source
+
 ```bash
-git clone https://github.com/QuakeWang/ossify.git
-cd ossify
+git clone https://github.com/QuakeWang/storify.git
+cd storify
 cargo build --release
+```
+
+The binary will be available at `target/release/storify`.
+
+### From Cargo (when published)
+
+```bash
+cargo install storify
 ```
 
 ## Configuration
 
-Set your storage provider and credentials:
+Set your storage provider and credentials using environment variables:
 
 ```bash
 # Choose provider: oss, s3, minio, or fs
@@ -55,39 +66,39 @@ STORAGE_ROOT_PATH=./storage
 
 ```bash
 # List directory contents
-ossify ls path/to/dir
-ossify ls path/to/dir -L          # detailed format
-ossify ls path/to/dir -R          # recursive
+storify ls path/to/dir
+storify ls path/to/dir -L          # detailed format
+storify ls path/to/dir -R          # recursive
 
 # Download files/directories  
-ossify get remote/path local/path
+storify get remote/path local/path
 
 # Upload files/directories
-ossify put local/path remote/path
-ossify put local/dir remote/dir -R # recursive
+storify put local/path remote/path
+storify put local/dir remote/dir -R # recursive
 
 # Copy within storage
-ossify cp source/path dest/path
+storify cp source/path dest/path
 
 # Show disk usage
-ossify du path/to/dir
-ossify du path/to/dir -s          # summary only
+storify du path/to/dir
+storify du path/to/dir -s          # summary only
 
 # Delete files/directories
-ossify rm path/to/file
-ossify rm path/to/dir -R          # recursive
+storify rm path/to/file
+storify rm path/to/dir -R          # recursive
 ```
 
 ## Command Reference
 
-| Command | Description |
-|---------|-------------|
-| `ls` | List directory contents |
-| `get` | Download files from remote |
-| `put` | Upload files to remote |
-| `cp` | Copy files within storage |
-| `rm` | Delete files/directories |
-| `du` | Show disk usage |
+| Command | Description | Options |
+|---------|-------------|---------|
+| `ls` | List directory contents | `-L` (detailed), `-R` (recursive) |
+| `get` | Download files from remote | |
+| `put` | Upload files to remote | `-R` (recursive) |
+| `cp` | Copy files within storage | |
+| `rm` | Delete files/directories | `-R` (recursive), `-f` (force) |
+| `du` | Show disk usage | `-s` (summary only) |
 
 ## Architecture
 
@@ -95,7 +106,7 @@ Built on [OpenDAL](https://github.com/apache/opendal) for unified storage access
 
 ```
 ┌─────────────────┐
-│   Ossify CLI    │
+│   Storify CLI   │
 ├─────────────────┤
 │ Storage Client  │
 ├─────────────────┤
@@ -104,6 +115,28 @@ Built on [OpenDAL](https://github.com/apache/opendal) for unified storage access
 │ OSS │ S3 │ MinIO│
 └─────────────────┘
 ```
+
+## Development
+
+### Prerequisites
+
+- Rust 1.80+
+- Cargo
+- Git
+
+### Building
+
+```bash
+# Debug build
+cargo build
+
+# Release build
+cargo build --release
+```
+
+## Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
 
 ## License
 

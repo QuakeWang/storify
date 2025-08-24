@@ -1,5 +1,5 @@
 use crate::error::Result;
-use crate::storage::utils::error::IntoOssifyError;
+use crate::storage::utils::error::IntoStorifyError;
 use crate::wrap_err;
 use futures::stream::TryStreamExt;
 use opendal::Operator;

@@ -1,14 +1,14 @@
 use assert_cmd::prelude::*;
 use libtest_mimic::{Failed, Trial};
 use opendal::Operator;
-use ossify::error::Result;
-use ossify::storage::StorageClient;
 use rand::Rng;
 use rand::prelude::*;
 use std::env;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::LazyLock;
+use storify::error::Result;
+use storify::storage::StorageClient;
 use uuid::Uuid;
 
 const TEST_DEFAULT_BUCKET: &str = "test";
@@ -25,7 +25,7 @@ pub static TEST_RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
 });
 
 // Cache MinIO config for tests to avoid repeated env reads
-static TEST_MINIO_CONFIG: LazyLock<ossify::storage::StorageConfig> =
+static TEST_MINIO_CONFIG: LazyLock<storify::storage::StorageConfig> =
     LazyLock::new(|| build_minio_config_from_env().expect("minio config"));
 
 pub async fn init_test_service() -> Result<StorageClient> {
@@ -46,7 +46,7 @@ pub fn get_test_data_path(file_name: &str) -> PathBuf {
         .join(file_name)
 }
 
-fn build_minio_config_from_env() -> Result<ossify::storage::StorageConfig> {
+fn build_minio_config_from_env() -> Result<storify::storage::StorageConfig> {
     let bucket = env::var("STORAGE_BUCKET").unwrap_or_else(|_| TEST_DEFAULT_BUCKET.to_string());
     let access_key_id = env::var("STORAGE_ACCESS_KEY_ID")
         .unwrap_or_else(|_| TEST_DEFAULT_ACCESS_KEY_ID.to_string());
@@ -60,7 +60,7 @@ fn build_minio_config_from_env() -> Result<ossify::storage::StorageConfig> {
         .unwrap_or_else(|| TEST_DEFAULT_ENDPOINT.to_string());
 
     let mut config =
-        ossify::storage::StorageConfig::s3(bucket, access_key_id, access_key_secret, Some(region));
+        storify::storage::StorageConfig::s3(bucket, access_key_id, access_key_secret, Some(region));
     config.endpoint = Some(endpoint);
 
     Ok(config)
@@ -69,7 +69,7 @@ fn build_minio_config_from_env() -> Result<ossify::storage::StorageConfig> {
 /// Apply MinIO config to a command as environment variables
 fn apply_minio_env<'a>(
     cmd: &'a mut Command,
-    cfg: &ossify::storage::StorageConfig,
+    cfg: &storify::storage::StorageConfig,
 ) -> &'a mut Command {
     cmd.env("STORAGE_PROVIDER", "minio")
         .env("STORAGE_BUCKET", &cfg.bucket)
@@ -95,9 +95,9 @@ fn apply_minio_env<'a>(
         )
 }
 
-/// Create a base ossify Command with clean environment and logging configured
+/// Create a base storify Command with clean environment and logging configured
 fn base_cmd() -> Command {
-    let mut cmd = Command::cargo_bin("ossify").unwrap();
+    let mut cmd = Command::cargo_bin("storify").unwrap();
     cmd.env_clear().env("RUST_LOG", "info");
     cmd
 }
@@ -107,7 +107,7 @@ pub async fn ensure_bucket_exists(op: &Operator) -> Result<()> {
     match op.create_dir("").await {
         Ok(_) => Ok(()),
         Err(e) if e.kind() == opendal::ErrorKind::Unexpected => Ok(()),
-        Err(e) => Err(ossify::error::Error::from(e)),
+        Err(e) => Err(storify::error::Error::from(e)),
     }
 }
 
@@ -188,7 +188,7 @@ impl Default for Fixture {
 
 /// A helper struct for managing End-to-End test environments.
 pub struct E2eTestEnv {
-    pub config: ossify::storage::StorageConfig,
+    pub config: storify::storage::StorageConfig,
     pub verifier: StorageClient,
 }
 
@@ -240,7 +240,7 @@ macro_rules! async_trials {
 
 pub static TEST_FIXTURE: Fixture = Fixture::new();
 
-pub fn ossify_cmd() -> Command {
+pub fn storify_cmd() -> Command {
     let cfg = TEST_MINIO_CONFIG.clone();
     let mut cmd = base_cmd();
     apply_minio_env(&mut cmd, &cfg);

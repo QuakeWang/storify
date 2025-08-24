@@ -1,10 +1,10 @@
 [package]
-name = "ossify"
+name = "storify"
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 description = "A unified command-line tool for managing object storage with HDFS-like interface"
-repository = "https://github.com/QuakeWang/ossify"
+repository = "https://github.com/QuakeWang/storify"
 authors = ["WangErxi"]
 
 [features]

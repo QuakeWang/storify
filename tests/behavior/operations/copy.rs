@@ -1,7 +1,7 @@
 use crate::*;
 use assert_cmd::prelude::*;
-use ossify::error::Result;
-use ossify::storage::StorageClient;
+use storify::error::Result;
+use storify::storage::StorageClient;
 use predicates::prelude::*;
 use std::path::Path;
 
@@ -31,7 +31,7 @@ async fn test_copy_file_to_existing_directory(client: StorageClient) -> Result<(
     let dest_dir = TEST_FIXTURE.new_dir_path();
     client.operator().create_dir(&dest_dir).await?;
 
-    ossify_cmd()
+    storify_cmd()
         .arg("cp")
         .arg(&src_file_path)
         .arg(&dest_dir)
@@ -54,7 +54,7 @@ async fn test_copy_file_to_new_path(client: StorageClient) -> Result<()> {
 
     let dest_file = TEST_FIXTURE.new_file_path();
 
-    ossify_cmd()
+    storify_cmd()
         .arg("cp")
         .arg(&src_file)
         .arg(&dest_file)
@@ -83,7 +83,7 @@ async fn test_copy_across_directory(client: StorageClient) -> Result<()> {
 
     let final_dest_path = join_remote_path(&dest_path, &final_dest_path);
 
-    ossify_cmd()
+    storify_cmd()
         .arg("cp")
         .arg(&src_path)
         .arg(&dest_path)
@@ -116,7 +116,7 @@ async fn test_copy_overwrite_existing_file(client: StorageClient) -> Result<()> 
     assert_eq!(dst_content, initial_dst_content.to_vec());
     assert_ne!(src_content, dst_content);
 
-    ossify_cmd()
+    storify_cmd()
         .arg("cp")
         .arg(&src_file_path)
         .arg(&dst_file_path)
@@ -139,7 +139,7 @@ async fn test_copy_to_nonexistent_directory(client: StorageClient) -> Result<()>
 
     let nonexistent_dir = format!("{}/", TEST_FIXTURE.new_dir_path());
 
-    ossify_cmd()
+    storify_cmd()
         .arg("cp")
         .arg(&src_file)
         .arg(&nonexistent_dir)
@@ -159,7 +159,7 @@ async fn test_copy_non_existent_file(client: StorageClient) -> Result<()> {
     let dest_path = TEST_FIXTURE.new_dir_path();
     client.operator().create_dir(&dest_path).await?;
 
-    ossify_cmd()
+    storify_cmd()
         .arg("cp")
         .arg(&final_src_file)
         .arg(&dest_path)

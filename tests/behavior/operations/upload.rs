@@ -1,9 +1,9 @@
 use crate::*;
 use crate::{get_test_data_path, join_remote_path};
 use assert_cmd::prelude::*;
-use ossify::error::Result;
-use ossify::storage::StorageClient;
 use predicates::prelude::*;
+use storify::error::Result;
+use storify::storage::StorageClient;
 use tokio::fs;
 
 pub fn tests(client: &StorageClient, tests: &mut Vec<Trial>) {
@@ -26,7 +26,7 @@ async fn test_storage_client_write(_client: StorageClient) -> Result<()> {
         .to_string();
     let expected_content = fs::read(&source_path).await?;
 
-    ossify_cmd()
+    storify_cmd()
         .arg("put")
         .arg(&source_path)
         .arg(&dest_prefix)
@@ -51,7 +51,7 @@ async fn test_storage_client_write_from_special_dir(_client: StorageClient) -> R
         .to_string();
     let expected_content = fs::read(&source_path).await?;
 
-    ossify_cmd()
+    storify_cmd()
         .arg("put")
         .arg(&source_path)
         .arg(&dest_prefix)
@@ -72,7 +72,7 @@ async fn e2e_test_upload_command_succeeds(_client: StorageClient) -> Result<()> 
     let final_dest_path = format!("{}", source_path.file_name().unwrap().to_string_lossy());
     let final_dest_path = join_remote_path(&dest_path, &final_dest_path);
 
-    ossify_cmd()
+    storify_cmd()
         .arg("put")
         .arg(&source_path)
         .arg(&dest_path)

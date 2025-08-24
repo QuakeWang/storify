@@ -1,8 +1,8 @@
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::storage::utils::path::get_root_relative_path;
 use futures::stream::TryStreamExt;
 use opendal::{EntryMode, Operator};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tokio::fs;
 
 /// Trait for downloading files and directories from storage.
@@ -32,6 +32,12 @@ impl OpenDalDownloader {
 
 impl Downloader for OpenDalDownloader {
     async fn download(&self, remote_path: &str, local_path: &str) -> Result<()> {
+        if !self.operator.exists(remote_path).await? {
+            return Err(Error::PathNotFound {
+                path: PathBuf::from(remote_path),
+            });
+        }
+
         let lister = self
             .operator
             .lister_with(remote_path)

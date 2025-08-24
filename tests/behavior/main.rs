@@ -1,6 +1,6 @@
 use libtest_mimic::Arguments;
 use libtest_mimic::Trial;
-use ossify::error::Result;
+use storify::error::Result;
 
 mod operations;
 mod utils;
@@ -17,6 +17,7 @@ fn main() -> Result<()> {
     operations::list::tests(&client, &mut tests);
     operations::copy::tests(&client, &mut tests);
     operations::delete::tests(&client, &mut tests);
+    operations::download::tests(&client, &mut tests);
     operations::upload::tests(&client, &mut tests);
 
     let _ = tracing_subscriber::fmt()
