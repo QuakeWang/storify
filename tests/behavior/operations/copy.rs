@@ -1,9 +1,9 @@
 use crate::*;
 use assert_cmd::prelude::*;
-use storify::error::Result;
-use storify::storage::StorageClient;
 use predicates::prelude::*;
 use std::path::Path;
+use storify::error::Result;
+use storify::storage::StorageClient;
 
 pub fn tests(client: &StorageClient, tests: &mut Vec<Trial>) {
     tests.extend(async_trials!(
