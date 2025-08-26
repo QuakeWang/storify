@@ -47,10 +47,10 @@ pub async fn test_du_summary_total_size(client: StorageClient) -> Result<()> {
         .assert()
         .success()
         // first summary line like: "<size> <path>"
-        .stdout(predicate::str::contains(&format!("{expected_human} {dir}")))
+        .stdout(predicate::str::contains(format!("{expected_human} {dir}")))
         .stdout(
-            predicate::str::contains(&format!("Total files: {expected_files}")).or(
-                predicate::str::contains(&format!("Total files: {alt_expected_files}")),
+            predicate::str::contains(format!("Total files: {expected_files}")).or(
+                predicate::str::contains(format!("Total files: {alt_expected_files}")),
             ),
         );
 

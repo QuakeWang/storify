@@ -43,7 +43,7 @@ pub async fn test_stat_dir_raw(client: StorageClient) -> Result<()> {
 
     storify_cmd()
         .arg("stat")
-        .arg(&format!("/{dir}"))
+        .arg(format!("/{dir}"))
         .arg("--raw")
         .assert()
         .success()
