@@ -14,10 +14,13 @@ pub fn tests(client: &StorageClient, tests: &mut Vec<Trial>) {
     ));
 }
 
-pub async fn test_stat_file_human(_client: StorageClient) -> Result<()> {
+pub async fn test_stat_file_human(client: StorageClient) -> Result<()> {
+    let (path, content, _size) = TEST_FIXTURE.new_file(client.operator());
+    client.operator().write(&path, content).await?;
+
     storify_cmd()
         .arg("stat")
-        .arg("/README.md")
+        .arg(&path)
         .assert()
         .success()
         .stdout(predicate::str::contains("type=file"))
@@ -25,10 +28,13 @@ pub async fn test_stat_file_human(_client: StorageClient) -> Result<()> {
     Ok(())
 }
 
-pub async fn test_stat_file_json(_client: StorageClient) -> Result<()> {
+pub async fn test_stat_file_json(client: StorageClient) -> Result<()> {
+    let (path, content, _size) = TEST_FIXTURE.new_file(client.operator());
+    client.operator().write(&path, content).await?;
+
     storify_cmd()
         .arg("stat")
-        .arg("/README.md")
+        .arg(&path)
         .arg("--json")
         .assert()
         .success()
