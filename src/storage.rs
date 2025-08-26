@@ -5,6 +5,7 @@ use std::str::FromStr;
 pub mod constants;
 mod operations;
 mod utils;
+pub use self::utils::OutputFormat;
 
 use self::operations::copy::OpenDalCopier;
 use self::operations::delete::OpenDalDeleter;
@@ -13,7 +14,9 @@ use self::operations::list::OpenDalLister;
 use self::operations::mkdir::OpenDalMkdirer;
 use self::operations::upload::OpenDalUploader;
 use self::operations::usage::OpenDalUsageCalculator;
-use self::operations::{Copier, Deleter, Downloader, Lister, Mkdirer, Uploader, UsageCalculator};
+use self::operations::{
+    Copier, Deleter, Downloader, Lister, Mkdirer, Stater, Uploader, UsageCalculator,
+};
 use crate::wrap_err;
 
 /// Storage provider types
@@ -321,5 +324,69 @@ impl StorageClient {
                 path: path.to_string()
             }
         )
+    }
+
+    pub async fn stat_metadata(&self, path: &str, format: OutputFormat) -> Result<()> {
+        log::debug!(
+            "stat_metadata provider={:?} path={} format={:?}",
+            self.provider,
+            path,
+            format
+        );
+        let stater = self::operations::stat::OpenDalStater::new(self.operator.clone());
+        let meta = stater.stat(path).await?;
+
+        match format {
+            OutputFormat::Human => {
+                println!("path={}", meta.path);
+                println!("type={}", meta.entry_type);
+                println!("size={}", meta.size);
+                if let Some(t) = meta.last_modified {
+                    println!("last_modified={}", t);
+                }
+                if let Some(etag) = meta.etag {
+                    println!("etag=\"{}\"", etag);
+                }
+                if let Some(ct) = meta.content_type {
+                    println!("content_type={}", ct);
+                }
+            }
+            OutputFormat::Raw => {
+                println!("path={}", meta.path);
+                println!("type={}", meta.entry_type);
+                println!("size={}", meta.size);
+                if let Some(t) = meta.last_modified {
+                    println!("last_modified={}", t);
+                }
+                if let Some(etag) = meta.etag {
+                    println!("etag=\"{}\"", etag);
+                }
+                if let Some(ct) = meta.content_type {
+                    println!("content_type={}", ct);
+                }
+            }
+            OutputFormat::Json => {
+                #[derive(serde::Serialize)]
+                struct JsonMeta<'a> {
+                    path: &'a str,
+                    entry_type: &'a str,
+                    size: u64,
+                    last_modified: Option<String>,
+                    etag: Option<String>,
+                    content_type: Option<String>,
+                }
+                let json = JsonMeta {
+                    path: &meta.path,
+                    entry_type: &meta.entry_type,
+                    size: meta.size,
+                    last_modified: meta.last_modified,
+                    etag: meta.etag,
+                    content_type: meta.content_type,
+                };
+                println!("{}", serde_json::to_string(&json)?);
+            }
+        }
+
+        Ok(())
     }
 }

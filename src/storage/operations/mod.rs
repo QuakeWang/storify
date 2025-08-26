@@ -4,6 +4,7 @@ pub mod delete;
 pub mod download;
 pub mod list;
 pub mod mkdir;
+pub mod stat;
 pub mod upload;
 pub mod usage;
 
@@ -13,5 +14,6 @@ pub use delete::Deleter;
 pub use download::Downloader;
 pub use list::Lister;
 pub use mkdir::Mkdirer;
+pub use stat::Stater;
 pub use upload::Uploader;
 pub use usage::UsageCalculator;

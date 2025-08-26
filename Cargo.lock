@@ -1729,6 +1729,8 @@ dependencies = [
  "opendal",
  "predicates",
  "rand 0.9.2",
+ "serde",
+ "serde_json",
  "snafu",
  "tokio",
  "tracing-subscriber",

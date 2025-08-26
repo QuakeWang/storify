@@ -71,6 +71,9 @@ pub enum Error {
 
     #[snafu(display("IO error: {source}"))]
     Io { source: std::io::Error },
+
+    #[snafu(display("JSON serialization error: {source}"))]
+    Json { source: serde_json::Error },
 }
 
 impl From<opendal::Error> for Error {
@@ -82,5 +85,11 @@ impl From<opendal::Error> for Error {
 impl From<std::io::Error> for Error {
     fn from(error: std::io::Error) -> Self {
         Error::Io { source: error }
+    }
+}
+
+impl From<serde_json::Error> for Error {
+    fn from(error: serde_json::Error) -> Self {
+        Error::Json { source: error }
     }
 }

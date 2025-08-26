@@ -1,6 +1,6 @@
 /// This module handles Command Line Interface (CLI) related logic.
 use crate::error::{Error, Result};
-use crate::storage::StorageClient;
+use crate::storage::{OutputFormat, StorageClient};
 use crate::utils::confirm_deletion;
 use clap::{Parser, Subcommand};
 
@@ -44,6 +44,8 @@ pub enum Commands {
     Cp(CpArgs),
     /// Create directories in remote storage
     Mkdir(MkdirArgs),
+    /// Display object metadata
+    Stat(StatArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -135,6 +137,21 @@ pub struct MkdirArgs {
     pub parents: bool,
 }
 
+#[derive(Parser, Debug)]
+pub struct StatArgs {
+    /// The path to stat
+    #[arg(value_name = "PATH", value_parser = parse_validated_path)]
+    pub path: String,
+
+    /// Output as JSON (machine-readable)
+    #[arg(long, conflicts_with = "raw")]
+    pub json: bool,
+
+    /// Output as raw key=value lines (compatible with opendal-mkdir)
+    #[arg(long, conflicts_with = "json")]
+    pub raw: bool,
+}
+
 pub async fn run(args: Args, client: StorageClient) -> Result<()> {
     match args.command {
         Commands::Ls(ls_args) => {
@@ -173,6 +190,16 @@ pub async fn run(args: Args, client: StorageClient) -> Result<()> {
             client
                 .create_directory(&mkdir_args.path, mkdir_args.parents)
                 .await?;
+        }
+        Commands::Stat(stat_args) => {
+            let format = if stat_args.json {
+                OutputFormat::Json
+            } else if stat_args.raw {
+                OutputFormat::Raw
+            } else {
+                OutputFormat::Human
+            };
+            client.stat_metadata(&stat_args.path, format).await?;
         }
     }
     Ok(())

@@ -87,6 +87,11 @@ storify du path/to/dir -s          # summary only
 # Delete files/directories
 storify rm path/to/file
 storify rm path/to/dir -R          # recursive
+
+# Show object metadata
+storify stat path/to/file           # human-readable
+storify stat path/to/file --raw     # raw key=value lines (compat with opendal-mkdir)
+storify stat path/to/file --json    # JSON output
 ```
 
 ## Command Reference
@@ -99,6 +104,7 @@ storify rm path/to/dir -R          # recursive
 | `cp` | Copy files within storage | |
 | `rm` | Delete files/directories | `-R` (recursive), `-f` (force) |
 | `du` | Show disk usage | `-s` (summary only) |
+| `stat` | Show object metadata | `--json`, `--raw` |
 
 ## Architecture
 
