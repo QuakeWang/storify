@@ -4,7 +4,7 @@ A unified command-line tool for managing object storage with HDFS-like interface
 
 ## Features
 
-- **Multi-cloud support**: OSS, S3, MinIO, and local filesystem
+- **Multi-cloud support**: OSS, S3, MinIO, COS, and local filesystem
 - **HDFS-compatible commands**: Familiar interface for Hadoop users
 - **Unified configuration**: Single tool for all storage providers
 - **High performance**: Async I/O with progress reporting
@@ -33,7 +33,7 @@ cargo install storify
 Set your storage provider and credentials using environment variables:
 
 ```bash
-# Choose provider: oss, s3, minio, or fs
+# Choose provider: oss, s3, minio, cos, or fs
 export STORAGE_PROVIDER=oss
 
 # Common configuration
@@ -57,6 +57,9 @@ AWS_S3_BUCKET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
 
 # MinIO
 MINIO_BUCKET, MINIO_ACCESS_KEY, MINIO_SECRET_KEY
+
+# COS
+COS_BUCKET, COS_SECRET_ID, COS_SECRET_KEY
 
 # Filesystem
 STORAGE_ROOT_PATH=./storage
@@ -118,7 +121,7 @@ Built on [OpenDAL](https://github.com/apache/opendal) for unified storage access
 ├─────────────────┤
 │    OpenDAL      │
 ├─────────────────┤
-│ OSS │ S3 │ MinIO│
+│ OSS │ S3 │ COS │ MinIO│
 └─────────────────┘
 ```
 

@@ -9,9 +9,10 @@ authors = ["WangErxi"]
 
 [features]
 # Enable common providers by default; HDFS requires JVM/Hadoop native libs at runtime
-default = ["oss", "s3", "fs"]
+default = ["oss", "s3", "cos", "fs"]
 oss = ["opendal/services-oss"]
 s3 = ["opendal/services-s3"]
+cos = ["opendal/services-cos"]
 fs = ["opendal/services-fs"]
 hdfs = ["opendal/services-hdfs"]
 

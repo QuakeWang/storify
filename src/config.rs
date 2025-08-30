@@ -61,6 +61,16 @@ impl ProviderKeys {
             endpoint: vec!["STORAGE_ENDPOINT", "MINIO_ENDPOINT"],
         }
     }
+
+    fn for_cos() -> Self {
+        Self {
+            bucket: vec!["STORAGE_BUCKET", "COS_BUCKET"],
+            access_key_id: vec!["STORAGE_ACCESS_KEY_ID", "COS_SECRET_ID"],
+            secret_key: vec!["STORAGE_ACCESS_KEY_SECRET", "COS_SECRET_KEY"],
+            region: vec!["STORAGE_REGION", "COS_REGION"],
+            endpoint: vec!["STORAGE_ENDPOINT", "COS_ENDPOINT"],
+        }
+    }
 }
 
 /// Select appropriate ProviderKeys for S3-like providers (AWS/MinIO)
@@ -83,6 +93,7 @@ pub fn load_storage_config() -> Result<StorageConfig> {
     match provider {
         StorageProvider::Oss => load_cloud_config(ProviderKeys::for_oss(), StorageConfig::oss),
         StorageProvider::S3 => load_cloud_config(s3_like_keys(&provider_str), StorageConfig::s3),
+        StorageProvider::Cos => load_cloud_config(ProviderKeys::for_cos(), StorageConfig::cos),
         StorageProvider::Fs => load_fs_config(),
         StorageProvider::Hdfs => load_hdfs_config(),
     }
