@@ -12,10 +12,11 @@ use self::operations::delete::OpenDalDeleter;
 use self::operations::download::OpenDalDownloader;
 use self::operations::list::OpenDalLister;
 use self::operations::mkdir::OpenDalMkdirer;
+use self::operations::mv::OpenDalMover;
 use self::operations::upload::OpenDalUploader;
 use self::operations::usage::OpenDalUsageCalculator;
 use self::operations::{
-    Copier, Deleter, Downloader, Lister, Mkdirer, Stater, Uploader, UsageCalculator,
+    Copier, Deleter, Downloader, Lister, Mkdirer, Mover, Stater, Uploader, UsageCalculator,
 };
 use crate::wrap_err;
 
@@ -304,6 +305,23 @@ impl StorageClient {
         wrap_err!(
             copier.copy(src_path, dest_path).await,
             CopyFailed {
+                src_path: src_path.to_string(),
+                dest_path: dest_path.to_string()
+            }
+        )
+    }
+
+    pub async fn move_files(&self, src_path: &str, dest_path: &str) -> Result<()> {
+        log::debug!(
+            "move_files provider={:?} src_path={} dest_path={}",
+            self.provider,
+            src_path,
+            dest_path
+        );
+        let mover = OpenDalMover::new(self.operator.clone());
+        wrap_err!(
+            mover.mover(src_path, dest_path).await,
+            MoveFailed {
                 src_path: src_path.to_string(),
                 dest_path: dest_path.to_string()
             }

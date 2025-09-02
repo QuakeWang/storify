@@ -42,6 +42,8 @@ pub enum Commands {
     Rm(RmArgs),
     /// Copy files/directories from remote to remote
     Cp(CpArgs),
+    /// Move files/directories from remote to remote
+    Mv(MvArgs),
     /// Create directories in remote storage
     Mkdir(MkdirArgs),
     /// Display object metadata
@@ -127,6 +129,17 @@ pub struct CpArgs {
 }
 
 #[derive(Parser, Debug)]
+pub struct MvArgs {
+    /// The remote path to move from
+    #[arg(value_name = "SRC", value_parser = parse_validated_path)]
+    pub src_path: String,
+
+    /// The remote path to move to
+    #[arg(value_name = "DEST", value_parser = parse_validated_path)]
+    pub dest_path: String,
+}
+
+#[derive(Parser, Debug)]
 pub struct MkdirArgs {
     /// The directory path to create
     #[arg(value_name = "PATH", value_parser = parse_validated_path)]
@@ -184,6 +197,11 @@ pub async fn run(args: Args, client: StorageClient) -> Result<()> {
         Commands::Cp(cp_args) => {
             client
                 .copy_files(&cp_args.src_path, &cp_args.dest_path)
+                .await?;
+        }
+        Commands::Mv(mv_args) => {
+            client
+                .move_files(&mv_args.src_path, &mv_args.dest_path)
                 .await?;
         }
         Commands::Mkdir(mkdir_args) => {

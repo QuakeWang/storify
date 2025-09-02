@@ -57,6 +57,13 @@ pub enum Error {
         source: Box<Error>,
     },
 
+    #[snafu(display("Failed to move '{src_path}' to '{dest_path}': {source}"))]
+    MoveFailed {
+        src_path: String,
+        dest_path: String,
+        source: Box<Error>,
+    },
+
     #[snafu(display("Failed to list directory '{path}': {source}"))]
     ListDirectoryFailed { path: String, source: Box<Error> },
 
