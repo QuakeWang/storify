@@ -20,7 +20,7 @@ async-recursion = "1.0.5"
 clap = { version = "4.5.43", features = ["derive", "env"] }
 futures = "0.3.30"
 log = "0.4"
-opendal = { version = "0.54.0", default-features = false }
+opendal = { version = "0.54.0" }
 snafu = "0.8"
 tokio = { version = "1.47.1", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
