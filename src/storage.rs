@@ -209,7 +209,6 @@ impl StorageClient {
                 if let Some(endpoint) = &config.endpoint {
                     builder = builder.endpoint(endpoint);
                 } else {
-                    // 使用默认的COS域名
                     builder = builder.endpoint("https://cos.myqcloud.com");
                 }
                 
