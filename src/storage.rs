@@ -197,9 +197,8 @@ impl StorageClient {
                 Ok(Operator::new(builder)?.finish())
             }
             StorageProvider::Cos => {
-                let mut builder = opendal::services::Cos::default()
-                    .bucket(&config.bucket);
-                
+                let mut builder = opendal::services::Cos::default().bucket(&config.bucket);
+
                 if let Some(access_key_id) = &config.access_key_id {
                     builder = builder.secret_id(access_key_id);
                 }
@@ -211,10 +210,15 @@ impl StorageClient {
                 } else {
                     builder = builder.endpoint("https://cos.myqcloud.com");
                 }
-                
-                log::debug!("COS builder config: bucket={}, endpoint={:?}, access_key_id={:?}, access_key_secret={:?}", 
-                    config.bucket, config.endpoint, config.access_key_id, config.access_key_secret);
-                
+
+                log::debug!(
+                    "COS builder config: bucket={}, endpoint={:?}, access_key_id={:?}, access_key_secret={:?}",
+                    config.bucket,
+                    config.endpoint,
+                    config.access_key_id,
+                    config.access_key_secret
+                );
+
                 Ok(Operator::new(builder)?.finish())
             }
             StorageProvider::Fs => {
