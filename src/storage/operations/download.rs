@@ -48,6 +48,14 @@ impl Downloader for OpenDalDownloader {
         while let Some(entry) = stream.try_next().await? {
             let meta = entry.metadata();
             let remote_file_path = entry.path();
+            // Skip malformed keys that contain double slashes which may be normalized differently at read time
+            if remote_file_path.contains("//") {
+                log::warn!(
+                    "Skip malformed remote key containing double slashes: {}",
+                    remote_file_path
+                );
+                continue;
+            }
             let mut relative_path = get_root_relative_path(remote_file_path, remote_path);
             if relative_path.is_empty() {
                 // Fallback: use base name
@@ -64,12 +72,26 @@ impl Downloader for OpenDalDownloader {
                 if let Some(parent) = local_file_path.parent() {
                     fs::create_dir_all(parent).await?;
                 }
-                let data = self.operator.read(remote_file_path).await?;
-                fs::write(&local_file_path, data.to_vec()).await?;
-                println!(
-                    "Downloaded: {remote_file_path} → {}",
-                    local_file_path.display()
-                );
+                match self.operator.read(remote_file_path).await {
+                    Ok(data) => {
+                        fs::write(&local_file_path, data.to_vec()).await?;
+                        println!(
+                            "Downloaded: {remote_file_path} → {}",
+                            local_file_path.display()
+                        );
+                    }
+                    Err(e) => {
+                        // Gracefully skip objects that cannot be found due to key normalization issues
+                        if e.kind() == opendal::ErrorKind::NotFound {
+                            log::warn!(
+                                "Skip not found at read (likely normalized key): {}",
+                                remote_file_path
+                            );
+                            continue;
+                        }
+                        return Err(e.into());
+                    }
+                }
             }
         }
 
