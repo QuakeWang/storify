@@ -114,15 +114,15 @@ storify stat path/to/file --json    # JSON output
 Built on [OpenDAL](https://github.com/apache/opendal) for unified storage access.
 
 ```
-┌─────────────────┐
-│   Storify CLI   │
-├─────────────────┤
-│ Storage Client  │
-├─────────────────┤
-│    OpenDAL      │
-├─────────────────┤
+┌───────────────────────┐
+│      Storify CLI      │
+├───────────────────────┤
+│    Storage Client     │
+├───────────────────────┤
+│       OpenDAL         │
+├───────────────────────┤
 │ OSS │ S3 │ COS │ MinIO│
-└─────────────────┘
+└───────────────────────┘
 ```
 
 ## Development

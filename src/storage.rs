@@ -20,7 +20,7 @@ use self::operations::{
 use crate::wrap_err;
 
 /// Storage provider types
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy)]
 pub enum StorageProvider {
     Oss,
     S3,
