@@ -128,13 +128,21 @@ async fn test_move_to_nonexistent_directory(client: StorageClient) -> Result<()>
 
     let nonexistent_dir = format!("{}/", TEST_FIXTURE.new_dir_path());
 
+    let final_dest_path = format!(
+        "{}",
+        Path::new(&src_file).file_name().unwrap().to_string_lossy()
+    );
+    let final_dest_path = join_remote_path(&nonexistent_dir, &final_dest_path);
+
     storify_cmd()
         .arg("mv")
         .arg(&src_file)
         .arg(&nonexistent_dir)
         .assert()
-        .failure()
-        .stderr(predicate::str::contains("Invalid path"));
+        .success();
+
+    let dest_content = client.operator().read(&final_dest_path).await?;
+    assert_eq!(content, dest_content.to_vec());
 
     Ok(())
 }

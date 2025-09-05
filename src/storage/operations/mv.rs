@@ -119,7 +119,7 @@ impl OpenDalMover {
 
             writer.write(data).await?;
             total_bytes += data_len as u64;
-            offset += chunk_size;
+            offset += data_len as u64;
 
             reporter.maybe_report(total_bytes);
         }
@@ -157,12 +157,11 @@ impl Mover for OpenDalMover {
             Ok(())
         } else {
             let dest_is_dir_hint = dest_path.ends_with('/');
-            let dest_is_dir = self.is_directory(dest_path).await;
+            let mut dest_is_dir = self.is_directory(dest_path).await;
 
             if dest_is_dir_hint && !dest_is_dir {
-                return Err(crate::error::Error::InvalidPath {
-                    path: dest_path.to_string(),
-                });
+                self.operator.create_dir(dest_path).await?;
+                dest_is_dir = true;
             }
 
             let final_dest = if dest_is_dir_hint || dest_is_dir {
