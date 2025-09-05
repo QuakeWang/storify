@@ -31,21 +31,27 @@ pub fn get_root_relative_path(full_path: &str, base_path: &str) -> String {
     let full_path = Path::new(full_path.trim_start_matches('/'));
     let base_path = Path::new(base_path.trim_start_matches('/'));
 
-    if full_path == base_path {
-        // For single-file case, return the file name to avoid empty relative path
-        return Path::new(full_path)
+    let mut rel = if full_path == base_path {
+        full_path
             .file_name()
             .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_default();
-    }
+            .unwrap_or_default()
+    } else {
+        full_path
+            .strip_prefix(base_path)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| {
+                full_path
+                    .file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default()
+            })
+    };
 
-    full_path
-        .strip_prefix(base_path)
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|_| {
-            full_path
-                .file_name()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_default()
-        })
+    // Normalize for safe local joining: remove leading slash and collapse duplicated slashes
+    if rel.starts_with('/') {
+        rel = rel.trim_start_matches('/').to_string();
+    }
+    rel = rel.replace("//", "/");
+    rel
 }

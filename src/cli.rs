@@ -48,6 +48,8 @@ pub enum Commands {
     Mkdir(MkdirArgs),
     /// Display object metadata
     Stat(StatArgs),
+    /// Display file contents
+    Cat(CatArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -151,6 +153,20 @@ pub struct MkdirArgs {
 }
 
 #[derive(Parser, Debug)]
+pub struct CatArgs {
+    /// The remote file path to display
+    #[arg(value_name = "PATH", value_parser = parse_validated_path)]
+    pub path: String,
+
+    #[arg(short = 'f', long)]
+    pub force: bool,
+
+    /// Limit file size in MB (default: 10)
+    #[arg(short = 's', long = "size-limit", default_value_t = 10)]
+    pub size_limit_mb: u64,
+}
+
+#[derive(Parser, Debug)]
 pub struct StatArgs {
     /// The path to stat
     #[arg(value_name = "PATH", value_parser = parse_validated_path)]
@@ -207,6 +223,11 @@ pub async fn run(args: Args, client: StorageClient) -> Result<()> {
         Commands::Mkdir(mkdir_args) => {
             client
                 .create_directory(&mkdir_args.path, mkdir_args.parents)
+                .await?;
+        }
+        Commands::Cat(cat_args) => {
+            client
+                .cat_file(&cat_args.path, cat_args.force, cat_args.size_limit_mb)
                 .await?;
         }
         Commands::Stat(stat_args) => {

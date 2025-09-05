@@ -7,6 +7,7 @@ mod operations;
 mod utils;
 pub use self::utils::OutputFormat;
 
+use self::operations::cat::OpenDalFileReader;
 use self::operations::copy::OpenDalCopier;
 use self::operations::delete::OpenDalDeleter;
 use self::operations::download::OpenDalDownloader;
@@ -16,7 +17,7 @@ use self::operations::mv::OpenDalMover;
 use self::operations::upload::OpenDalUploader;
 use self::operations::usage::OpenDalUsageCalculator;
 use self::operations::{
-    Copier, Deleter, Downloader, Lister, Mkdirer, Mover, Stater, Uploader, UsageCalculator,
+    Cater, Copier, Deleter, Downloader, Lister, Mkdirer, Mover, Stater, Uploader, UsageCalculator,
 };
 use crate::wrap_err;
 
@@ -25,6 +26,7 @@ use crate::wrap_err;
 pub enum StorageProvider {
     Oss,
     S3,
+    Cos,
     Fs,
     Hdfs,
 }
@@ -36,6 +38,7 @@ impl FromStr for StorageProvider {
         match s.to_lowercase().as_str() {
             "oss" => Ok(Self::Oss),
             "s3" | "minio" => Ok(Self::S3),
+            "cos" => Ok(Self::Cos),
             "fs" => Ok(Self::Fs),
             "hdfs" => Ok(Self::Hdfs),
             _ => Err(Error::UnsupportedProvider {
@@ -88,6 +91,24 @@ impl StorageConfig {
             bucket,
             access_key_id: Some(access_key_id),
             access_key_secret: Some(secret_access_key),
+            endpoint: None,
+            region,
+            root_path: None,
+            name_node: None,
+        }
+    }
+
+    pub fn cos(
+        bucket: String,
+        secret_id: String,
+        secret_key: String,
+        region: Option<String>,
+    ) -> Self {
+        Self {
+            provider: StorageProvider::Cos,
+            bucket,
+            access_key_id: Some(secret_id),
+            access_key_secret: Some(secret_key),
             endpoint: None,
             region,
             root_path: None,
@@ -175,6 +196,31 @@ impl StorageClient {
                 if let Some(endpoint) = &config.endpoint {
                     builder = builder.endpoint(endpoint);
                 }
+                Ok(Operator::new(builder)?.finish())
+            }
+            StorageProvider::Cos => {
+                let mut builder = opendal::services::Cos::default().bucket(&config.bucket);
+
+                if let Some(access_key_id) = &config.access_key_id {
+                    builder = builder.secret_id(access_key_id);
+                }
+                if let Some(secret_access_key) = &config.access_key_secret {
+                    builder = builder.secret_key(secret_access_key);
+                }
+                if let Some(endpoint) = &config.endpoint {
+                    builder = builder.endpoint(endpoint);
+                } else {
+                    builder = builder.endpoint("https://cos.myqcloud.com");
+                }
+
+                log::debug!(
+                    "COS builder config: bucket={}, endpoint={:?}, access_key_id={:?}, access_key_secret={:?}",
+                    config.bucket,
+                    config.endpoint,
+                    config.access_key_id,
+                    config.access_key_secret
+                );
+
                 Ok(Operator::new(builder)?.finish())
             }
             StorageProvider::Fs => {
@@ -339,6 +385,23 @@ impl StorageClient {
         wrap_err!(
             mkdirer.mkdir(path, parents).await,
             DirectoryCreationFailed {
+                path: path.to_string()
+            }
+        )
+    }
+
+    pub async fn cat_file(&self, path: &str, force: bool, size_limit_mb: u64) -> Result<()> {
+        log::debug!(
+            "cat_file provider={:?} path={},force={},size_limit_mb={}",
+            self.provider,
+            path,
+            force,
+            size_limit_mb
+        );
+        let reader = OpenDalFileReader::new(self.operator.clone());
+        wrap_err!(
+            reader.cat(path, force, size_limit_mb).await,
+            CatFailed {
                 path: path.to_string()
             }
         )

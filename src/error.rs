@@ -73,6 +73,9 @@ pub enum Error {
     #[snafu(display("Failed to create directory '{path}': {source}"))]
     DirectoryCreationFailed { path: String, source: Box<Error> },
 
+    #[snafu(display("Failed to read file '{path}': {source}"))]
+    CatFailed { path: String, source: Box<Error> },
+
     #[snafu(display("OpenDAL error: {source}"))]
     OpenDal { source: opendal::Error },
 

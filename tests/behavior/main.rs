@@ -21,6 +21,7 @@ fn main() -> Result<()> {
     operations::mkdir::tests(&client, &mut tests);
     operations::mv::tests(&client, &mut tests);
     operations::upload::tests(&client, &mut tests);
+    operations::cat::tests(&client, &mut tests);
     operations::usage::tests(&client, &mut tests);
     operations::stat::tests(&client, &mut tests);
 
