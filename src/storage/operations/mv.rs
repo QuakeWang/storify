@@ -105,6 +105,10 @@ impl OpenDalMover {
         );
 
         loop {
+            if offset >= file_size {
+                break;
+            }
+
             let chunk_size = std::cmp::min(DEFAULT_CHUNK_SIZE as u64, file_size - offset);
 
             let data = self
