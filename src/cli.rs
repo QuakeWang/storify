@@ -50,6 +50,8 @@ pub enum Commands {
     Stat(StatArgs),
     /// Display file contents
     Cat(CatArgs),
+    /// Display beginning of file contents
+    Head(HeadArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -181,6 +183,25 @@ pub struct StatArgs {
     pub raw: bool,
 }
 
+#[derive(Parser, Debug)]
+pub struct HeadArgs {
+    /// The remote file path to display
+    #[arg(value_name = "PATH", value_parser = parse_validated_path)]
+    pub path: String,
+
+    /// Number of lines to display
+    #[arg(short = 'n', long, conflicts_with = "bytes")]
+    pub lines: Option<usize>,
+
+    /// Number of bytes to display
+    #[arg(short = 'c', long, conflicts_with = "lines")]
+    pub bytes: Option<usize>,
+
+    /// Force display without size confirmation
+    #[arg(short = 'f', long)]
+    pub force: bool,
+}
+
 pub async fn run(args: Args, client: StorageClient) -> Result<()> {
     match args.command {
         Commands::Ls(ls_args) => {
@@ -228,6 +249,16 @@ pub async fn run(args: Args, client: StorageClient) -> Result<()> {
         Commands::Cat(cat_args) => {
             client
                 .cat_file(&cat_args.path, cat_args.force, cat_args.size_limit_mb)
+                .await?;
+        }
+        Commands::Head(head_args) => {
+            client
+                .head_file(
+                    &head_args.path,
+                    head_args.lines,
+                    head_args.bytes,
+                    head_args.force,
+                )
                 .await?;
         }
         Commands::Stat(stat_args) => {

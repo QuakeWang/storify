@@ -11,13 +11,15 @@ use self::operations::cat::OpenDalFileReader;
 use self::operations::copy::OpenDalCopier;
 use self::operations::delete::OpenDalDeleter;
 use self::operations::download::OpenDalDownloader;
+use self::operations::head::OpenDalHeadReader;
 use self::operations::list::OpenDalLister;
 use self::operations::mkdir::OpenDalMkdirer;
 use self::operations::mv::OpenDalMover;
 use self::operations::upload::OpenDalUploader;
 use self::operations::usage::OpenDalUsageCalculator;
 use self::operations::{
-    Cater, Copier, Deleter, Downloader, Lister, Mkdirer, Mover, Stater, Uploader, UsageCalculator,
+    Cater, Copier, Deleter, Downloader, Header, Lister, Mkdirer, Mover, Stater, Uploader,
+    UsageCalculator,
 };
 use crate::wrap_err;
 
@@ -402,6 +404,30 @@ impl StorageClient {
         wrap_err!(
             reader.cat(path, force, size_limit_mb).await,
             CatFailed {
+                path: path.to_string()
+            }
+        )
+    }
+
+    pub async fn head_file(
+        &self,
+        path: &str,
+        lines: Option<usize>,
+        bytes: Option<usize>,
+        force: bool,
+    ) -> Result<()> {
+        log::debug!(
+            "head_file provider={:?} path={} lines={:?} bytes={:?} force={}",
+            self.provider,
+            path,
+            lines,
+            bytes,
+            force
+        );
+        let reader = OpenDalHeadReader::new(self.operator.clone());
+        wrap_err!(
+            reader.head(path, lines, bytes, force).await,
+            HeadFailed {
                 path: path.to_string()
             }
         )

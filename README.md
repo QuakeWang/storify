@@ -90,6 +90,12 @@ storify mv path/src_file  path/dest_file
 # Display file contents
 storify cat path/to/file
 
+# Display beginning of file contents
+storify head path/to/file          # first 1KB (default)
+storify head -n 10 path/to/file    # first 10 lines
+storify head -c 2048 path/to/file  # first 2048 bytes
+storify head -f path/to/file       # force display without size confirmation
+
 # Show disk usage
 storify du path/to/dir
 storify du path/to/dir -s          # summary only
@@ -114,6 +120,7 @@ storify stat path/to/file --json    # JSON output
 | `cp` | Copy files within storage | |
 | `mv` | Rename files, or move files | |
 | `cat` | Display file contents | |
+| `head` | Display beginning of file contents | `-n` (lines), `-c` (bytes), `-f` (force) |
 | `rm` | Delete files/directories | `-R` (recursive), `-f` (force) |
 | `du` | Show disk usage | `-s` (summary only) |
 | `stat` | Show object metadata | `--json`, `--raw` |
