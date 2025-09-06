@@ -18,6 +18,7 @@ fn main() -> Result<()> {
     operations::copy::tests(&client, &mut tests);
     operations::delete::tests(&client, &mut tests);
     operations::download::tests(&client, &mut tests);
+    operations::head::tests(&client, &mut tests);
     operations::mkdir::tests(&client, &mut tests);
     operations::mv::tests(&client, &mut tests);
     operations::upload::tests(&client, &mut tests);
