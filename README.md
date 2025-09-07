@@ -113,6 +113,7 @@ storify stat path/to/file --json    # JSON output
 | `put` | Upload files to remote | `-R` (recursive) |
 | `cp` | Copy files within storage | |
 | `mv` | Rename files, or move files | |
+| `mkdir` | Create directories | `-p` (parents) |
 | `cat` | Display file contents | |
 | `rm` | Delete files/directories | `-R` (recursive), `-f` (force) |
 | `du` | Show disk usage | `-s` (summary only) |
