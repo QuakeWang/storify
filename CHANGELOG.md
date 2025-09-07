@@ -38,5 +38,3 @@
 - Rename project from Ossify to Storify and update related configurations (#27)
 
 - update dependencies and version in Cargo files (#38)
-
-Thanks for @freedom3219 @liwuhen @liang767339  @QuakeWang
