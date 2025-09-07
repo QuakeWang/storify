@@ -1,6 +1,6 @@
 [package]
 name = "storify"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 license = "Apache-2.0"
 description = "A unified command-line tool for managing object storage with HDFS-like interface"
@@ -18,22 +18,22 @@ hdfs = ["opendal/services-hdfs"]
 
 [dependencies]
 async-recursion = "1.0.5"
-clap = { version = "4.5.43", features = ["derive", "env"] }
+clap = { version = "4.5.47", features = ["derive", "env"] }
 futures = "0.3.30"
-log = "0.4"
+log = "0.4.28"
 opendal = { version = "0.54.0" }
-snafu = "0.8"
+snafu = "0.8.9"
 tokio = { version = "1.47.1", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde_json = "1.0.143"
 
 [dev-dependencies]
 assert_cmd = "2.0.17"
 libtest-mimic = "0.8.1"
 predicates = "3.1.3"
 rand = "0.9.2"
-tracing-subscriber = { version = "0.3.19", features = ["env-filter", "tracing-log"] }
-uuid = { version = "1.17.0", features = ["v4"] }
+tracing-subscriber = { version = "0.3.20", features = ["env-filter", "tracing-log"] }
+uuid = { version = "1.18.1", features = ["v4"] }
 
 [[test]]
 harness = false
