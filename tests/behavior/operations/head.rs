@@ -1,6 +1,5 @@
 use crate::*;
 use assert_cmd::prelude::*;
-use std::path::Path;
 use storify::error::Result;
 use storify::storage::StorageClient;
 use tokio::fs;
@@ -16,25 +15,36 @@ pub fn tests(client: &StorageClient, tests: &mut Vec<Trial>) {
     ));
 }
 
+/// Create a temporary file under system temp dir with given content and return its path.
+fn create_temp_file_with_content(content: &[u8]) -> String {
+    let path = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+    std::fs::write(&path, content).expect("write temp file");
+    path.to_string_lossy().to_string()
+}
+
+/// Upload a local file to a generated remote prefix via CLI and return the full remote path.
+fn upload_and_remote_path(local_path: &str, dest_prefix: &str) -> String {
+    storify_cmd()
+        .arg("put")
+        .arg(local_path)
+        .arg(dest_prefix)
+        .assert()
+        .success();
+
+    let file_name = std::path::Path::new(local_path)
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    join_remote_path(dest_prefix, &file_name)
+}
+
 // Verify head displays first 1KB by default
 async fn test_head_default_1kb(_client: StorageClient) -> Result<()> {
     let source_path = get_test_data_path("small.txt");
     let dest_prefix = TEST_FIXTURE.new_file_path();
 
-    // Upload via CLI to ensure end-to-end path
-    storify_cmd()
-        .arg("put")
-        .arg(&source_path)
-        .arg(&dest_prefix)
-        .assert()
-        .success();
-
-    let file_name = source_path
-        .file_name()
-        .unwrap()
-        .to_string_lossy()
-        .to_string();
-    let remote_path = join_remote_path(&dest_prefix, &file_name);
+    let remote_path = upload_and_remote_path(&source_path.to_string_lossy(), &dest_prefix);
 
     let assert = storify_cmd()
         .arg("head")
@@ -43,10 +53,8 @@ async fn test_head_default_1kb(_client: StorageClient) -> Result<()> {
         .success();
     let output = assert.get_output().stdout.clone();
 
-    // Verify output length doesn't exceed 1KB
     assert!(output.len() <= 1024);
 
-    // Verify output is not empty for non-empty files
     let source_content = fs::read(&source_path).await?;
     if !source_content.is_empty() {
         assert!(!output.is_empty());
@@ -57,29 +65,13 @@ async fn test_head_default_1kb(_client: StorageClient) -> Result<()> {
 
 // Verify head displays first N lines
 async fn test_head_by_lines(_client: StorageClient) -> Result<()> {
-    // Create a test file with multiple lines
-    let test_content = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\n";
-    let temp_file = TEST_FIXTURE.new_file_path();
-    fs::write(&temp_file, test_content).await?;
+    let test_content = b"Line 1\nLine 2\nLine 3\nLine 4\nLine 5\n";
+    let temp_file = create_temp_file_with_content(test_content);
 
     let dest_prefix = TEST_FIXTURE.new_file_path();
 
-    // Upload via CLI
-    storify_cmd()
-        .arg("put")
-        .arg(&temp_file)
-        .arg(&dest_prefix)
-        .assert()
-        .success();
+    let remote_path = upload_and_remote_path(&temp_file, &dest_prefix);
 
-    let file_name = Path::new(&temp_file)
-        .file_name()
-        .unwrap()
-        .to_string_lossy()
-        .to_string();
-    let remote_path = join_remote_path(&dest_prefix, &file_name);
-
-    // Test head -n 3
     let assert = storify_cmd()
         .arg("head")
         .arg("-n")
@@ -90,11 +82,9 @@ async fn test_head_by_lines(_client: StorageClient) -> Result<()> {
     let output = assert.get_output().stdout.clone();
     let output_str = String::from_utf8_lossy(&output);
 
-    // Verify output has exactly 3 lines
     let line_count = output_str.lines().count();
     assert_eq!(line_count, 3);
 
-    // Verify content
     assert!(output_str.contains("Line 1"));
     assert!(output_str.contains("Line 2"));
     assert!(output_str.contains("Line 3"));
@@ -105,29 +95,13 @@ async fn test_head_by_lines(_client: StorageClient) -> Result<()> {
 
 // Verify head displays first N bytes
 async fn test_head_by_bytes(_client: StorageClient) -> Result<()> {
-    // Create a test file with known content
-    let test_content = "Hello, World! ".repeat(100); // Create content longer than 50 bytes
-    let temp_file = TEST_FIXTURE.new_file_path();
-    fs::write(&temp_file, test_content.as_bytes()).await?;
+    let test_content = "Hello, World! ".repeat(100); // longer than 50 bytes
+    let temp_file = create_temp_file_with_content(test_content.as_bytes());
 
     let dest_prefix = TEST_FIXTURE.new_file_path();
 
-    // Upload via CLI
-    storify_cmd()
-        .arg("put")
-        .arg(&temp_file)
-        .arg(&dest_prefix)
-        .assert()
-        .success();
+    let remote_path = upload_and_remote_path(&temp_file, &dest_prefix);
 
-    let file_name = Path::new(&temp_file)
-        .file_name()
-        .unwrap()
-        .to_string_lossy()
-        .to_string();
-    let remote_path = join_remote_path(&dest_prefix, &file_name);
-
-    // Test head -c 50
     let assert = storify_cmd()
         .arg("head")
         .arg("-c")
@@ -137,10 +111,8 @@ async fn test_head_by_bytes(_client: StorageClient) -> Result<()> {
         .success();
     let output = assert.get_output().stdout.clone();
 
-    // Verify output has exactly 50 bytes
     assert_eq!(output.len(), 50);
 
-    // Verify content starts correctly
     let output_str = String::from_utf8_lossy(&output);
     assert!(output_str.starts_with("Hello, World! Hello, World! Hello, World! Hello"));
 
@@ -160,7 +132,6 @@ async fn test_head_nonexistent_file(_client: StorageClient) -> Result<()> {
     let stderr = assert.get_output().stderr.clone();
     let stderr_str = String::from_utf8_lossy(&stderr);
 
-    // Verify error message indicates file not found
     assert!(stderr_str.contains("not found") || stderr_str.contains("NotFound"));
 
     Ok(())
@@ -168,29 +139,13 @@ async fn test_head_nonexistent_file(_client: StorageClient) -> Result<()> {
 
 // Verify head works with force flag for large files
 async fn test_head_large_file_force(_client: StorageClient) -> Result<()> {
-    // Create a larger test file
-    let test_content = "Hello, World!\n".repeat(1000); // Create content longer than 1KB
-    let temp_file = TEST_FIXTURE.new_file_path();
-    fs::write(&temp_file, test_content.as_bytes()).await?;
+    let test_content = "Hello, World!\n".repeat(1000);
+    let temp_file = create_temp_file_with_content(test_content.as_bytes());
 
     let dest_prefix = TEST_FIXTURE.new_file_path();
 
-    // Upload via CLI
-    storify_cmd()
-        .arg("put")
-        .arg(&temp_file)
-        .arg(&dest_prefix)
-        .assert()
-        .success();
+    let remote_path = upload_and_remote_path(&temp_file, &dest_prefix);
 
-    let file_name = Path::new(&temp_file)
-        .file_name()
-        .unwrap()
-        .to_string_lossy()
-        .to_string();
-    let remote_path = join_remote_path(&dest_prefix, &file_name);
-
-    // Test head with force flag
     let assert = storify_cmd()
         .arg("head")
         .arg("-f")
@@ -199,10 +154,8 @@ async fn test_head_large_file_force(_client: StorageClient) -> Result<()> {
         .success();
     let output = assert.get_output().stdout.clone();
 
-    // Verify output length is exactly 1KB (default)
     assert_eq!(output.len(), 1024);
 
-    // Verify content starts correctly
     let output_str = String::from_utf8_lossy(&output);
     assert!(output_str.starts_with("Hello, World!"));
 

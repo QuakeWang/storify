@@ -63,9 +63,11 @@ impl OpenDalHeadReader {
         })?;
 
         // Determine reading mode and size limit
+        // We only apply size confirmation for the default behavior (no flags).
+        // Explicit -n/-c should never prompt/abort.
         let (mode, size_limit) = match (lines, bytes) {
             (Some(line_count), None) => (HeadMode::Lines(line_count), None),
-            (None, Some(byte_count)) => (HeadMode::Bytes(byte_count), Some(byte_count)),
+            (None, Some(byte_count)) => (HeadMode::Bytes(byte_count), None),
             (None, None) => (HeadMode::Bytes(1024), Some(1024)), // Default 1KB
             (Some(_), Some(_)) => {
                 return Err(Error::InvalidArgument {
@@ -132,14 +134,18 @@ impl OpenDalHeadReader {
 
     /// Read and display file content by bytes.
     async fn head_by_bytes(&self, path: &str, bytes: usize) -> Result<()> {
-        let file_size = self
-            .operator
-            .stat(path)
-            .await
-            .map_err(|e| self.map_to_head_failed(path, e))?
-            .content_length();
+        // Try to stat file to get size; if stat fails or returns 0, still attempt to read requested bytes.
+        let file_size = match self.operator.stat(path).await {
+            Ok(meta) => meta.content_length(),
+            Err(_) => 0,
+        } as usize;
 
-        let bytes_to_read = std::cmp::min(bytes, file_size as usize);
+        let bytes_to_read = if file_size == 0 {
+            // Unknown size; attempt to read the requested range anyway
+            bytes
+        } else {
+            std::cmp::min(bytes, file_size)
+        };
 
         if bytes_to_read == 0 {
             return Ok(());

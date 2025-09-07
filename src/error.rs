@@ -14,7 +14,7 @@ pub enum Error {
     ))]
     UnsupportedProvider { provider: String },
 
-    #[snafu(display("Path does not exist: {}", path.display()))]
+    #[snafu(display("Path not found: {}", path.display()))]
     PathNotFound { path: PathBuf },
 
     #[snafu(display("Invalid path: {path}"))]
