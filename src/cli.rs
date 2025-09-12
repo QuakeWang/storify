@@ -258,7 +258,7 @@ pub async fn run(args: Args, client: StorageClient) -> Result<()> {
         Commands::Head(head_args) => {
             if head_args.paths.len() <= 1 {
                 // Single file path; behave like classic head
-                let path = head_args.paths.get(0).ok_or_else(|| Error::InvalidPath {
+                let path = head_args.paths.first().ok_or_else(|| Error::InvalidPath {
                     path: "".to_string(),
                 })?;
                 client
