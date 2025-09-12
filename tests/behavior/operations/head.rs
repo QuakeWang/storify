@@ -2,16 +2,18 @@ use crate::*;
 use assert_cmd::prelude::*;
 use storify::error::Result;
 use storify::storage::StorageClient;
-use tokio::fs;
 
 pub fn tests(client: &StorageClient, tests: &mut Vec<Trial>) {
     tests.extend(async_trials!(
         client,
-        test_head_default_1kb,
-        test_head_by_lines,
-        test_head_by_bytes,
+        test_head_default_10_lines,
+        test_head_n_lines,
+        test_head_c_bytes,
+        test_head_zero_lines_and_zero_bytes,
         test_head_nonexistent_file,
-        test_head_large_file_force
+        test_head_multi_files_with_headers,
+        test_head_multi_files_quiet,
+        test_head_multi_files_verbose
     ));
 }
 
@@ -39,12 +41,15 @@ fn upload_and_remote_path(local_path: &str, dest_prefix: &str) -> String {
     join_remote_path(dest_prefix, &file_name)
 }
 
-// Verify head displays first 1KB by default
-async fn test_head_default_1kb(_client: StorageClient) -> Result<()> {
-    let source_path = get_test_data_path("small.txt");
-    let dest_prefix = TEST_FIXTURE.new_file_path();
+// Default: first 10 lines
+async fn test_head_default_10_lines(_client: StorageClient) -> Result<()> {
+    // Build a file with >10 lines
+    let lines: Vec<String> = (1..=20).map(|i| format!("line-{i}")) .collect();
+    let content = lines.join("\n") + "\n"; // newline-terminated
+    let local = create_temp_file_with_content(content.as_bytes());
 
-    let remote_path = upload_and_remote_path(&source_path.to_string_lossy(), &dest_prefix);
+    let dest_prefix = TEST_FIXTURE.new_file_path();
+    let remote_path = upload_and_remote_path(&local, &dest_prefix);
 
     let assert = storify_cmd()
         .arg("head")
@@ -52,25 +57,24 @@ async fn test_head_default_1kb(_client: StorageClient) -> Result<()> {
         .assert()
         .success();
     let output = assert.get_output().stdout.clone();
+    let out = String::from_utf8_lossy(&output);
 
-    assert!(output.len() <= 1024);
-
-    let source_content = fs::read(&source_path).await?;
-    if !source_content.is_empty() {
-        assert!(!output.is_empty());
-    }
+    // Expect exactly 10 lines (if file has >=10)
+    assert_eq!(out.lines().count(), 10);
+    // Check first and last emitted line
+    assert!(out.starts_with("line-1\n"));
+    assert!(out.contains("line-10\n"));
+    assert!(!out.contains("line-11\n"));
 
     Ok(())
 }
 
-// Verify head displays first N lines
-async fn test_head_by_lines(_client: StorageClient) -> Result<()> {
-    let test_content = b"Line 1\nLine 2\nLine 3\nLine 4\nLine 5\n";
-    let temp_file = create_temp_file_with_content(test_content);
-
+// -n N lines
+async fn test_head_n_lines(_client: StorageClient) -> Result<()> {
+    let content = b"A\nB\nC\nD\nE\n"; // 5 lines
+    let local = create_temp_file_with_content(content);
     let dest_prefix = TEST_FIXTURE.new_file_path();
-
-    let remote_path = upload_and_remote_path(&temp_file, &dest_prefix);
+    let remote_path = upload_and_remote_path(&local, &dest_prefix);
 
     let assert = storify_cmd()
         .arg("head")
@@ -79,28 +83,22 @@ async fn test_head_by_lines(_client: StorageClient) -> Result<()> {
         .arg(&remote_path)
         .assert()
         .success();
-    let output = assert.get_output().stdout.clone();
-    let output_str = String::from_utf8_lossy(&output);
-
-    let line_count = output_str.lines().count();
-    assert_eq!(line_count, 3);
-
-    assert!(output_str.contains("Line 1"));
-    assert!(output_str.contains("Line 2"));
-    assert!(output_str.contains("Line 3"));
-    assert!(!output_str.contains("Line 4"));
+    let out = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert_eq!(out.lines().count(), 3);
+    assert!(out.starts_with("A\n"));
+    assert!(out.contains("B\n"));
+    assert!(out.contains("C\n"));
+    assert!(!out.contains("D\n"));
 
     Ok(())
 }
 
-// Verify head displays first N bytes
-async fn test_head_by_bytes(_client: StorageClient) -> Result<()> {
-    let test_content = "Hello, World! ".repeat(100); // longer than 50 bytes
-    let temp_file = create_temp_file_with_content(test_content.as_bytes());
-
+// -c N bytes
+async fn test_head_c_bytes(_client: StorageClient) -> Result<()> {
+    let content = "Hello, World! ".repeat(10); // 150 bytes
+    let local = create_temp_file_with_content(content.as_bytes());
     let dest_prefix = TEST_FIXTURE.new_file_path();
-
-    let remote_path = upload_and_remote_path(&temp_file, &dest_prefix);
+    let remote_path = upload_and_remote_path(&local, &dest_prefix);
 
     let assert = storify_cmd()
         .arg("head")
@@ -110,7 +108,6 @@ async fn test_head_by_bytes(_client: StorageClient) -> Result<()> {
         .assert()
         .success();
     let output = assert.get_output().stdout.clone();
-
     assert_eq!(output.len(), 50);
 
     let output_str = String::from_utf8_lossy(&output);
@@ -119,7 +116,37 @@ async fn test_head_by_bytes(_client: StorageClient) -> Result<()> {
     Ok(())
 }
 
-// Verify head fails gracefully for non-existent files
+// Zero lines and zero bytes should output nothing
+async fn test_head_zero_lines_and_zero_bytes(_client: StorageClient) -> Result<()> {
+    let content = b"X\nY\nZ\n";
+    let local = create_temp_file_with_content(content);
+    let dest_prefix = TEST_FIXTURE.new_file_path();
+    let remote_path = upload_and_remote_path(&local, &dest_prefix);
+
+    // -n 0
+    let out_n0 = storify_cmd()
+        .arg("head")
+        .arg("-n").arg("0")
+        .arg(&remote_path)
+        .assert()
+        .success()
+        .get_output().stdout.clone();
+    assert!(out_n0.is_empty());
+
+    // -c 0
+    let out_c0 = storify_cmd()
+        .arg("head")
+        .arg("-c").arg("0")
+        .arg(&remote_path)
+        .assert()
+        .success()
+        .get_output().stdout.clone();
+    assert!(out_c0.is_empty());
+
+    Ok(())
+}
+
+// Non-existent file should fail with not found message
 async fn test_head_nonexistent_file(_client: StorageClient) -> Result<()> {
     let non_existent_path = "nonexistent_file.txt";
 
@@ -132,32 +159,85 @@ async fn test_head_nonexistent_file(_client: StorageClient) -> Result<()> {
     let stderr = assert.get_output().stderr.clone();
     let stderr_str = String::from_utf8_lossy(&stderr);
 
-    assert!(stderr_str.contains("not found") || stderr_str.contains("NotFound"));
+    assert!(
+        stderr_str.contains("not found") ||
+        stderr_str.contains("NotFound") ||
+        stderr_str.contains("Path does not exist")
+    );
 
     Ok(())
 }
 
-// Verify head works with force flag for large files
-async fn test_head_large_file_force(_client: StorageClient) -> Result<()> {
-    let test_content = "Hello, World!\n".repeat(1000);
-    let temp_file = create_temp_file_with_content(test_content.as_bytes());
+// Multiple files: default shows headers when >1 files
+async fn test_head_multi_files_with_headers(_client: StorageClient) -> Result<()> {
+    let src1 = get_test_data_path("small.txt");
+    let src2_content = (1..=5).map(|i| format!("L{i}")) .collect::<Vec<_>>().join("\n") + "\n";
+    let src2 = create_temp_file_with_content(src2_content.as_bytes());
 
     let dest_prefix = TEST_FIXTURE.new_file_path();
-
-    let remote_path = upload_and_remote_path(&temp_file, &dest_prefix);
+    let remote1 = upload_and_remote_path(&src1.to_string_lossy(), &dest_prefix);
+    let remote2 = upload_and_remote_path(&src2, &dest_prefix);
 
     let assert = storify_cmd()
         .arg("head")
-        .arg("-f")
-        .arg(&remote_path)
+        .arg(&remote1)
+        .arg(&remote2)
         .assert()
         .success();
-    let output = assert.get_output().stdout.clone();
 
-    assert_eq!(output.len(), 1024);
+    let out = String::from_utf8_lossy(&assert.get_output().stdout);
+    // Expect headers like ==> path <== present twice
+    assert!(out.contains(&format!("==> {} <==", remote1)));
+    assert!(out.contains(&format!("==> {} <==", remote2)));
 
-    let output_str = String::from_utf8_lossy(&output);
-    assert!(output_str.starts_with("Hello, World!"));
+    Ok(())
+}
+
+// Multiple files with -q: no headers
+async fn test_head_multi_files_quiet(_client: StorageClient) -> Result<()> {
+    let src1 = get_test_data_path("small.txt");
+    let src2_content = (1..=3).map(|i| format!("q{i}")) .collect::<Vec<_>>().join("\n") + "\n";
+    let src2 = create_temp_file_with_content(src2_content.as_bytes());
+
+    let dest_prefix = TEST_FIXTURE.new_file_path();
+    let remote1 = upload_and_remote_path(&src1.to_string_lossy(), &dest_prefix);
+    let remote2 = upload_and_remote_path(&src2, &dest_prefix);
+
+    let assert = storify_cmd()
+        .arg("head")
+        .arg("-q")
+        .arg(&remote1)
+        .arg(&remote2)
+        .assert()
+        .success();
+
+    let out = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(!out.contains("==>"));
+
+    Ok(())
+}
+
+// Multiple files with -v: always show headers
+async fn test_head_multi_files_verbose(_client: StorageClient) -> Result<()> {
+    let src1 = get_test_data_path("small.txt");
+    let src2_content = (1..=2).map(|i| format!("v{i}")) .collect::<Vec<_>>().join("\n") + "\n";
+    let src2 = create_temp_file_with_content(src2_content.as_bytes());
+
+    let dest_prefix = TEST_FIXTURE.new_file_path();
+    let remote1 = upload_and_remote_path(&src1.to_string_lossy(), &dest_prefix);
+    let remote2 = upload_and_remote_path(&src2, &dest_prefix);
+
+    let assert = storify_cmd()
+        .arg("head")
+        .arg("-v")
+        .arg(&remote1)
+        .arg(&remote2)
+        .assert()
+        .success();
+
+    let out = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(out.contains(&format!("==> {} <==", remote1)));
+    assert!(out.contains(&format!("==> {} <==", remote2)));
 
     Ok(())
 }

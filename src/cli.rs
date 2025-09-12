@@ -185,9 +185,9 @@ pub struct StatArgs {
 
 #[derive(Parser, Debug)]
 pub struct HeadArgs {
-    /// The remote file path to display
+    /// Remote file path(s) to display
     #[arg(value_name = "PATH", value_parser = parse_validated_path)]
-    pub path: String,
+    pub paths: Vec<String>,
 
     /// Number of lines to display
     #[arg(short = 'n', long, conflicts_with = "bytes")]
@@ -197,9 +197,13 @@ pub struct HeadArgs {
     #[arg(short = 'c', long, conflicts_with = "lines")]
     pub bytes: Option<usize>,
 
-    /// Force display without size confirmation
-    #[arg(short = 'f', long)]
-    pub force: bool,
+    /// Do not print headers for multiple files
+    #[arg(short = 'q', long, conflicts_with = "verbose")]
+    pub quiet: bool,
+
+    /// Always print headers
+    #[arg(short = 'v', long, conflicts_with = "quiet")]
+    pub verbose: bool,
 }
 
 pub async fn run(args: Args, client: StorageClient) -> Result<()> {
@@ -252,14 +256,29 @@ pub async fn run(args: Args, client: StorageClient) -> Result<()> {
                 .await?;
         }
         Commands::Head(head_args) => {
-            client
-                .head_file(
-                    &head_args.path,
-                    head_args.lines,
-                    head_args.bytes,
-                    head_args.force,
-                )
-                .await?;
+            if head_args.paths.len() <= 1 {
+                // Single file path; behave like classic head
+                let path = head_args.paths.get(0).ok_or_else(|| Error::InvalidPath { path: "".to_string() })?;
+                client
+                    .head_file(
+                        path,
+                        head_args.lines,
+                        head_args.bytes,
+                        false,
+                    )
+                    .await?;
+            } else {
+                client
+                    .head_files(
+                        &head_args.paths,
+                        head_args.lines,
+                        head_args.bytes,
+                        head_args.quiet,
+                        head_args.verbose,
+                        false,
+                    )
+                    .await?;
+            }
         }
         Commands::Stat(stat_args) => {
             let format = if stat_args.json {

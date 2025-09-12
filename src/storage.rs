@@ -433,6 +433,34 @@ impl StorageClient {
         )
     }
 
+    pub async fn head_files(
+        &self,
+        paths: &[String],
+        lines: Option<usize>,
+        bytes: Option<usize>,
+        quiet: bool,
+        verbose: bool,
+        force: bool,
+    ) -> Result<()> {
+        log::debug!(
+            "head_files provider={:?} paths_count={} lines={:?} bytes={:?} quiet={} verbose={} force={}",
+            self.provider,
+            paths.len(),
+            lines,
+            bytes,
+            quiet,
+            verbose,
+            force
+        );
+        let reader = OpenDalHeadReader::new(self.operator.clone());
+        wrap_err!(
+            reader.head_many(paths, lines, bytes, quiet, verbose, force).await,
+            HeadFailed {
+                path: paths.iter().take(5).cloned().collect::<Vec<_>>().join(",")
+            }
+        )
+    }
+
     pub async fn stat_metadata(&self, path: &str, format: OutputFormat) -> Result<()> {
         log::debug!(
             "stat_metadata provider={:?} path={} format={:?}",
