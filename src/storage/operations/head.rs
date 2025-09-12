@@ -277,8 +277,6 @@ impl OpenDalHeadReader {
         })
     }
 
-    
-
     /// Map OpenDAL error to HeadFailed error.
     fn map_to_head_failed(&self, path: &str, err: opendal::Error) -> Error {
         Error::HeadFailed {

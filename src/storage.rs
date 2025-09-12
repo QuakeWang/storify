@@ -454,7 +454,9 @@ impl StorageClient {
         );
         let reader = OpenDalHeadReader::new(self.operator.clone());
         wrap_err!(
-            reader.head_many(paths, lines, bytes, quiet, verbose, force).await,
+            reader
+                .head_many(paths, lines, bytes, quiet, verbose, force)
+                .await,
             HeadFailed {
                 path: paths.iter().take(5).cloned().collect::<Vec<_>>().join(",")
             }

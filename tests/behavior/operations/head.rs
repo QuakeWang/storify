@@ -44,7 +44,7 @@ fn upload_and_remote_path(local_path: &str, dest_prefix: &str) -> String {
 // Default: first 10 lines
 async fn test_head_default_10_lines(_client: StorageClient) -> Result<()> {
     // Build a file with >10 lines
-    let lines: Vec<String> = (1..=20).map(|i| format!("line-{i}")) .collect();
+    let lines: Vec<String> = (1..=20).map(|i| format!("line-{i}")).collect();
     let content = lines.join("\n") + "\n"; // newline-terminated
     let local = create_temp_file_with_content(content.as_bytes());
 
@@ -126,21 +126,27 @@ async fn test_head_zero_lines_and_zero_bytes(_client: StorageClient) -> Result<(
     // -n 0
     let out_n0 = storify_cmd()
         .arg("head")
-        .arg("-n").arg("0")
+        .arg("-n")
+        .arg("0")
         .arg(&remote_path)
         .assert()
         .success()
-        .get_output().stdout.clone();
+        .get_output()
+        .stdout
+        .clone();
     assert!(out_n0.is_empty());
 
     // -c 0
     let out_c0 = storify_cmd()
         .arg("head")
-        .arg("-c").arg("0")
+        .arg("-c")
+        .arg("0")
         .arg(&remote_path)
         .assert()
         .success()
-        .get_output().stdout.clone();
+        .get_output()
+        .stdout
+        .clone();
     assert!(out_c0.is_empty());
 
     Ok(())
@@ -160,9 +166,9 @@ async fn test_head_nonexistent_file(_client: StorageClient) -> Result<()> {
     let stderr_str = String::from_utf8_lossy(&stderr);
 
     assert!(
-        stderr_str.contains("not found") ||
-        stderr_str.contains("NotFound") ||
-        stderr_str.contains("Path does not exist")
+        stderr_str.contains("not found")
+            || stderr_str.contains("NotFound")
+            || stderr_str.contains("Path does not exist")
     );
 
     Ok(())
@@ -171,7 +177,11 @@ async fn test_head_nonexistent_file(_client: StorageClient) -> Result<()> {
 // Multiple files: default shows headers when >1 files
 async fn test_head_multi_files_with_headers(_client: StorageClient) -> Result<()> {
     let src1 = get_test_data_path("small.txt");
-    let src2_content = (1..=5).map(|i| format!("L{i}")) .collect::<Vec<_>>().join("\n") + "\n";
+    let src2_content = (1..=5)
+        .map(|i| format!("L{i}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
     let src2 = create_temp_file_with_content(src2_content.as_bytes());
 
     let dest_prefix = TEST_FIXTURE.new_file_path();
@@ -196,7 +206,11 @@ async fn test_head_multi_files_with_headers(_client: StorageClient) -> Result<()
 // Multiple files with -q: no headers
 async fn test_head_multi_files_quiet(_client: StorageClient) -> Result<()> {
     let src1 = get_test_data_path("small.txt");
-    let src2_content = (1..=3).map(|i| format!("q{i}")) .collect::<Vec<_>>().join("\n") + "\n";
+    let src2_content = (1..=3)
+        .map(|i| format!("q{i}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
     let src2 = create_temp_file_with_content(src2_content.as_bytes());
 
     let dest_prefix = TEST_FIXTURE.new_file_path();
@@ -220,7 +234,11 @@ async fn test_head_multi_files_quiet(_client: StorageClient) -> Result<()> {
 // Multiple files with -v: always show headers
 async fn test_head_multi_files_verbose(_client: StorageClient) -> Result<()> {
     let src1 = get_test_data_path("small.txt");
-    let src2_content = (1..=2).map(|i| format!("v{i}")) .collect::<Vec<_>>().join("\n") + "\n";
+    let src2_content = (1..=2)
+        .map(|i| format!("v{i}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
     let src2 = create_temp_file_with_content(src2_content.as_bytes());
 
     let dest_prefix = TEST_FIXTURE.new_file_path();
