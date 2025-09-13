@@ -50,6 +50,8 @@ pub enum Commands {
     Stat(StatArgs),
     /// Display file contents
     Cat(CatArgs),
+    /// Display beginning of file contents
+    Head(HeadArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -181,6 +183,29 @@ pub struct StatArgs {
     pub raw: bool,
 }
 
+#[derive(Parser, Debug)]
+pub struct HeadArgs {
+    /// Remote file path(s) to display
+    #[arg(value_name = "PATH", value_parser = parse_validated_path)]
+    pub paths: Vec<String>,
+
+    /// Number of lines to display
+    #[arg(short = 'n', long, conflicts_with = "bytes")]
+    pub lines: Option<usize>,
+
+    /// Number of bytes to display
+    #[arg(short = 'c', long, conflicts_with = "lines")]
+    pub bytes: Option<usize>,
+
+    /// Do not print headers for multiple files
+    #[arg(short = 'q', long, conflicts_with = "verbose")]
+    pub quiet: bool,
+
+    /// Always print headers
+    #[arg(short = 'v', long, conflicts_with = "quiet")]
+    pub verbose: bool,
+}
+
 pub async fn run(args: Args, client: StorageClient) -> Result<()> {
     match args.command {
         Commands::Ls(ls_args) => {
@@ -229,6 +254,27 @@ pub async fn run(args: Args, client: StorageClient) -> Result<()> {
             client
                 .cat_file(&cat_args.path, cat_args.force, cat_args.size_limit_mb)
                 .await?;
+        }
+        Commands::Head(head_args) => {
+            if head_args.paths.len() <= 1 {
+                // Single file path; behave like classic head
+                let path = head_args.paths.first().ok_or_else(|| Error::InvalidPath {
+                    path: "".to_string(),
+                })?;
+                client
+                    .head_file(path, head_args.lines, head_args.bytes)
+                    .await?;
+            } else {
+                client
+                    .head_files(
+                        &head_args.paths,
+                        head_args.lines,
+                        head_args.bytes,
+                        head_args.quiet,
+                        head_args.verbose,
+                    )
+                    .await?;
+            }
         }
         Commands::Stat(stat_args) => {
             let format = if stat_args.json {

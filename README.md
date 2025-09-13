@@ -90,6 +90,16 @@ storify mv path/src_file  path/dest_file
 # Display file contents
 storify cat path/to/file
 
+# Display beginning of file contents
+storify head path/to/file          # first 10 lines (default)
+storify head -n 10 path/to/file    # first 10 lines
+storify head -c 2048 path/to/file  # first 2048 bytes
+
+# Multiple files and headers
+storify head file1 file2           # headers printed by default
+storify head -q file1 file2        # suppress headers
+storify head -v path/to/file       # always print header (even single file)
+
 # Show disk usage
 storify du path/to/dir
 storify du path/to/dir -s          # summary only
@@ -115,6 +125,7 @@ storify stat path/to/file --json    # JSON output
 | `mv` | Rename files, or move files | |
 | `mkdir` | Create directories | `-p` (parents) |
 | `cat` | Display file contents | |
+| `head` | Display beginning of file contents | `-n` (lines), `-c` (bytes), `-q` (quiet), `-v` (verbose) |
 | `rm` | Delete files/directories | `-R` (recursive), `-f` (force) |
 | `du` | Show disk usage | `-s` (summary only) |
 | `stat` | Show object metadata | `--json`, `--raw` |
