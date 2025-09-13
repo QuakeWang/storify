@@ -414,19 +414,17 @@ impl StorageClient {
         path: &str,
         lines: Option<usize>,
         bytes: Option<usize>,
-        force: bool,
     ) -> Result<()> {
         log::debug!(
-            "head_file provider={:?} path={} lines={:?} bytes={:?} force={}",
+            "head_file provider={:?} path={} lines={:?} bytes={:?}",
             self.provider,
             path,
             lines,
-            bytes,
-            force
+            bytes
         );
         let reader = OpenDalHeadReader::new(self.operator.clone());
         wrap_err!(
-            reader.head(path, lines, bytes, force).await,
+            reader.head(path, lines, bytes).await,
             HeadFailed {
                 path: path.to_string()
             }
@@ -440,23 +438,19 @@ impl StorageClient {
         bytes: Option<usize>,
         quiet: bool,
         verbose: bool,
-        force: bool,
     ) -> Result<()> {
         log::debug!(
-            "head_files provider={:?} paths_count={} lines={:?} bytes={:?} quiet={} verbose={} force={}",
+            "head_files provider={:?} paths_count={} lines={:?} bytes={:?} quiet={} verbose={}",
             self.provider,
             paths.len(),
             lines,
             bytes,
             quiet,
-            verbose,
-            force
+            verbose
         );
         let reader = OpenDalHeadReader::new(self.operator.clone());
         wrap_err!(
-            reader
-                .head_many(paths, lines, bytes, quiet, verbose, force)
-                .await,
+            reader.head_many(paths, lines, bytes, quiet, verbose).await,
             HeadFailed {
                 path: paths.iter().take(5).cloned().collect::<Vec<_>>().join(",")
             }

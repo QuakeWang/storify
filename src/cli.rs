@@ -262,7 +262,7 @@ pub async fn run(args: Args, client: StorageClient) -> Result<()> {
                     path: "".to_string(),
                 })?;
                 client
-                    .head_file(path, head_args.lines, head_args.bytes, false)
+                    .head_file(path, head_args.lines, head_args.bytes)
                     .await?;
             } else {
                 client
@@ -272,7 +272,6 @@ pub async fn run(args: Args, client: StorageClient) -> Result<()> {
                         head_args.bytes,
                         head_args.quiet,
                         head_args.verbose,
-                        false,
                     )
                     .await?;
             }

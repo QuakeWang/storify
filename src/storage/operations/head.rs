@@ -11,17 +11,10 @@ pub trait Header {
     /// * `path` - File path to display
     /// * `lines` - Number of lines to display (None for byte-based reading)
     /// * `bytes` - Number of bytes to display (None for line-based reading)
-    /// * `force` - Whether to bypass size-limit confirmation
     ///
     /// # Returns
     /// * `Result<()>` - Success or detailed error information
-    async fn head(
-        &self,
-        path: &str,
-        lines: Option<usize>,
-        bytes: Option<usize>,
-        force: bool,
-    ) -> Result<()>;
+    async fn head(&self, path: &str, lines: Option<usize>, bytes: Option<usize>) -> Result<()>;
 }
 
 /// Implementation of Header for OpenDAL Operator.
@@ -40,7 +33,6 @@ impl OpenDalHeadReader {
     /// * `path` - File path to display
     /// * `lines` - Number of lines to display (None for byte-based reading)
     /// * `bytes` - Number of bytes to display (None for line-based reading)
-    /// * `force` - Whether to bypass size-limit confirmation
     ///
     /// # Returns
     /// * `Result<()>` - Success or detailed error information
@@ -49,7 +41,6 @@ impl OpenDalHeadReader {
         path: &str,
         lines: Option<usize>,
         bytes: Option<usize>,
-        _force: bool,
     ) -> Result<()> {
         // Ensure path exists and map NotFound to PathNotFound
         let _ = self.operator.stat(path).await.map_err(|e| {
@@ -96,7 +87,6 @@ impl OpenDalHeadReader {
         bytes: Option<usize>,
         quiet: bool,
         verbose: bool,
-        force: bool,
     ) -> Result<()> {
         if quiet && verbose {
             return Err(Error::InvalidArgument {
@@ -124,7 +114,7 @@ impl OpenDalHeadReader {
                 println!("==> {} <==", p);
             }
 
-            if let Err(e) = self.read_and_display_head(p, lines, bytes, force).await {
+            if let Err(e) = self.read_and_display_head(p, lines, bytes).await {
                 eprintln!("{}", e);
             }
         }
@@ -152,18 +142,10 @@ impl OpenDalHeadReader {
         let mut handle = stdout.lock();
 
         let mut next_offset: u64 = 0;
-        let mut lines_emitted: usize = 0;
-        let mut carry: Vec<u8> = Vec::new();
+        let mut lines_remaining: usize = max_lines;
 
         loop {
             if next_offset >= file_size {
-                // EOF: output any remaining partial line without adding extra newline.
-                if !carry.is_empty() {
-                    handle.write_all(&carry).map_err(|e| Error::HeadFailed {
-                        path: path.to_string(),
-                        source: Box::new(e.into()),
-                    })?;
-                }
                 break;
             }
 
@@ -183,57 +165,30 @@ impl OpenDalHeadReader {
             let n = chunk.len();
 
             if n == 0 {
-                // EOF: output any remaining partial line without adding extra newline.
-                if !carry.is_empty() {
-                    handle.write_all(&carry).map_err(|e| Error::HeadFailed {
-                        path: path.to_string(),
-                        source: Box::new(e.into()),
-                    })?;
-                }
                 break;
             }
 
-            let mut start_idx: usize = 0;
+            let mut last_emit: usize = 0;
             for i in 0..n {
-                if chunk[i] == b'\n' {
-                    // Write carry, then the current line including the newline.
-                    if !carry.is_empty() {
-                        handle.write_all(&carry).map_err(|e| Error::HeadFailed {
-                            path: path.to_string(),
-                            source: Box::new(e.into()),
-                        })?;
-                        carry.clear();
-                    }
-                    handle
-                        .write_all(&chunk[start_idx..=i])
-                        .map_err(|e| Error::HeadFailed {
-                            path: path.to_string(),
-                            source: Box::new(e.into()),
-                        })?;
-                    lines_emitted += 1;
-                    start_idx = i + 1;
-                    if lines_emitted >= max_lines {
-                        handle.flush().map_err(|e| Error::HeadFailed {
-                            path: path.to_string(),
-                            source: Box::new(e.into()),
-                        })?;
+                if chunk[i] == b'\n' && lines_remaining > 0 {
+                    self.write_all_handle(path, &mut handle, &chunk[last_emit..=i])?;
+                    lines_remaining -= 1;
+                    last_emit = i + 1;
+                    if lines_remaining == 0 {
+                        self.flush_handle(path, &mut handle)?;
                         return Ok(());
                     }
                 }
             }
 
-            // Save remainder (partial line) for next chunk.
-            if start_idx < n {
-                carry.extend_from_slice(&chunk[start_idx..n]);
+            if lines_remaining > 0 && last_emit < n {
+                self.write_all_handle(path, &mut handle, &chunk[last_emit..n])?;
             }
 
             next_offset += n as u64;
         }
 
-        handle.flush().map_err(|e| Error::HeadFailed {
-            path: path.to_string(),
-            source: Box::new(e.into()),
-        })
+        self.flush_handle(path, &mut handle)
     }
 
     /// Read and display file content by bytes.
@@ -266,15 +221,8 @@ impl OpenDalHeadReader {
         let mut handle = stdout.lock();
 
         let bytes = data.to_vec();
-        handle.write_all(&bytes).map_err(|e| Error::HeadFailed {
-            path: path.to_string(),
-            source: Box::new(e.into()),
-        })?;
-
-        handle.flush().map_err(|e| Error::HeadFailed {
-            path: path.to_string(),
-            source: Box::new(e.into()),
-        })
+        self.write_all_handle(path, &mut handle, &bytes)?;
+        self.flush_handle(path, &mut handle)
     }
 
     /// Map OpenDAL error to HeadFailed error.
@@ -284,17 +232,35 @@ impl OpenDalHeadReader {
             source: Box::new(err.into()),
         }
     }
+
+    /// Map std::io::Error to HeadFailed error.
+    fn map_io_to_head_failed(&self, path: &str, err: io::Error) -> Error {
+        Error::HeadFailed {
+            path: path.to_string(),
+            source: Box::new(err.into()),
+        }
+    }
+
+    /// Helper to write all bytes with unified error handling.
+    fn write_all_handle<W: Write>(&self, path: &str, handle: &mut W, buf: &[u8]) -> Result<()> {
+        handle
+            .write_all(buf)
+            .map_err(|e| self.map_io_to_head_failed(path, e))
+    }
+
+    /// Helper to flush with unified error handling.
+    fn flush_handle<W: Write>(&self, path: &str, handle: &mut W) -> Result<()> {
+        handle
+            .flush()
+            .map_err(|e| self.map_io_to_head_failed(path, e))
+    }
+
+    // carry 相关逻辑已移除，改为按块流式输出
 }
 
 impl Header for OpenDalHeadReader {
-    async fn head(
-        &self,
-        path: &str,
-        lines: Option<usize>,
-        bytes: Option<usize>,
-        force: bool,
-    ) -> Result<()> {
-        self.read_and_display_head(path, lines, bytes, force).await
+    async fn head(&self, path: &str, lines: Option<usize>, bytes: Option<usize>) -> Result<()> {
+        self.read_and_display_head(path, lines, bytes).await
     }
 }
 
