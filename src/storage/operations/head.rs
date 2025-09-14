@@ -43,7 +43,7 @@ impl OpenDalHeadReader {
         bytes: Option<usize>,
     ) -> Result<()> {
         // Ensure path exists and map NotFound to PathNotFound
-        let _ = self.operator.stat(path).await.map_err(|e| {
+        let meta = self.operator.stat(path).await.map_err(|e| {
             if e.kind() == opendal::ErrorKind::NotFound {
                 Error::PathNotFound {
                     path: PathBuf::from(path),
@@ -52,6 +52,7 @@ impl OpenDalHeadReader {
                 self.map_to_head_failed(path, e)
             }
         })?;
+        let file_size = meta.content_length();
 
         // Determine reading mode
         // Default behavior (no flags) reads first 10 lines without confirmation.
@@ -69,10 +70,10 @@ impl OpenDalHeadReader {
         // Read and display based on mode
         match mode {
             HeadMode::Lines(line_count) => {
-                self.head_by_lines(path, line_count).await?;
+                self.head_by_lines(path, line_count, file_size).await?;
             }
             HeadMode::Bytes(byte_count) => {
-                self.head_by_bytes(path, byte_count).await?;
+                self.head_by_bytes(path, byte_count, file_size).await?;
             }
         }
 
@@ -123,18 +124,10 @@ impl OpenDalHeadReader {
     }
 
     /// Read and display file content by lines using ranged, chunked reads.
-    async fn head_by_lines(&self, path: &str, max_lines: usize) -> Result<()> {
+    async fn head_by_lines(&self, path: &str, max_lines: usize, file_size: u64) -> Result<()> {
         if max_lines == 0 {
             return Ok(());
         }
-
-        // Determine file size to clamp range end within object bounds.
-        let file_size = self
-            .operator
-            .stat(path)
-            .await
-            .map_err(|e| self.map_to_head_failed(path, e))?
-            .content_length();
 
         // Use small ranged reads to avoid loading entire file.
         const CHUNK_SIZE: u64 = 8192;
@@ -192,18 +185,12 @@ impl OpenDalHeadReader {
     }
 
     /// Read and display file content by bytes.
-    async fn head_by_bytes(&self, path: &str, bytes: usize) -> Result<()> {
-        // Try to stat file to get size; if stat fails or returns 0, still attempt to read requested bytes.
-        let file_size = match self.operator.stat(path).await {
-            Ok(meta) => meta.content_length(),
-            Err(_) => 0,
-        } as usize;
-
+    async fn head_by_bytes(&self, path: &str, bytes: usize, file_size: u64) -> Result<()> {
         let bytes_to_read = if file_size == 0 {
             // Unknown size; attempt to read the requested range anyway
             bytes
         } else {
-            std::cmp::min(bytes, file_size)
+            std::cmp::min(bytes, file_size as usize)
         };
 
         if bytes_to_read == 0 {
@@ -254,8 +241,6 @@ impl OpenDalHeadReader {
             .flush()
             .map_err(|e| self.map_io_to_head_failed(path, e))
     }
-
-    // carry 相关逻辑已移除，改为按块流式输出
 }
 
 impl Header for OpenDalHeadReader {
