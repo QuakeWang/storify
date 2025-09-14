@@ -11,13 +11,15 @@ use self::operations::cat::OpenDalFileReader;
 use self::operations::copy::OpenDalCopier;
 use self::operations::delete::OpenDalDeleter;
 use self::operations::download::OpenDalDownloader;
+use self::operations::head::OpenDalHeadReader;
 use self::operations::list::OpenDalLister;
 use self::operations::mkdir::OpenDalMkdirer;
 use self::operations::mv::OpenDalMover;
 use self::operations::upload::OpenDalUploader;
 use self::operations::usage::OpenDalUsageCalculator;
 use self::operations::{
-    Cater, Copier, Deleter, Downloader, Lister, Mkdirer, Mover, Stater, Uploader, UsageCalculator,
+    Cater, Copier, Deleter, Downloader, Header, Lister, Mkdirer, Mover, Stater, Uploader,
+    UsageCalculator,
 };
 use crate::wrap_err;
 
@@ -403,6 +405,54 @@ impl StorageClient {
             reader.cat(path, force, size_limit_mb).await,
             CatFailed {
                 path: path.to_string()
+            }
+        )
+    }
+
+    pub async fn head_file(
+        &self,
+        path: &str,
+        lines: Option<usize>,
+        bytes: Option<usize>,
+    ) -> Result<()> {
+        log::debug!(
+            "head_file provider={:?} path={} lines={:?} bytes={:?}",
+            self.provider,
+            path,
+            lines,
+            bytes
+        );
+        let reader = OpenDalHeadReader::new(self.operator.clone());
+        wrap_err!(
+            reader.head(path, lines, bytes).await,
+            HeadFailed {
+                path: path.to_string()
+            }
+        )
+    }
+
+    pub async fn head_files(
+        &self,
+        paths: &[String],
+        lines: Option<usize>,
+        bytes: Option<usize>,
+        quiet: bool,
+        verbose: bool,
+    ) -> Result<()> {
+        log::debug!(
+            "head_files provider={:?} paths_count={} lines={:?} bytes={:?} quiet={} verbose={}",
+            self.provider,
+            paths.len(),
+            lines,
+            bytes,
+            quiet,
+            verbose
+        );
+        let reader = OpenDalHeadReader::new(self.operator.clone());
+        wrap_err!(
+            reader.head_many(paths, lines, bytes, quiet, verbose).await,
+            HeadFailed {
+                path: paths.iter().take(5).cloned().collect::<Vec<_>>().join(",")
             }
         )
     }

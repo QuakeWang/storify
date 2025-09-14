@@ -14,7 +14,7 @@ pub enum Error {
     ))]
     UnsupportedProvider { provider: String },
 
-    #[snafu(display("Path does not exist: {}", path.display()))]
+    #[snafu(display("Path not found: {}", path.display()))]
     PathNotFound { path: PathBuf },
 
     #[snafu(display("Invalid path: {path}"))]
@@ -75,6 +75,12 @@ pub enum Error {
 
     #[snafu(display("Failed to read file '{path}': {source}"))]
     CatFailed { path: String, source: Box<Error> },
+
+    #[snafu(display("Failed to read head of file '{path}': {source}"))]
+    HeadFailed { path: String, source: Box<Error> },
+
+    #[snafu(display("Invalid argument: {message}"))]
+    InvalidArgument { message: String },
 
     #[snafu(display("OpenDAL error: {source}"))]
     OpenDal { source: opendal::Error },
