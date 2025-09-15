@@ -52,6 +52,8 @@ pub enum Commands {
     Cat(CatArgs),
     /// Display beginning of file contents
     Head(HeadArgs),
+    /// Display end of file contents
+    Tail(TailArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -206,6 +208,29 @@ pub struct HeadArgs {
     pub verbose: bool,
 }
 
+#[derive(Parser, Debug)]
+pub struct TailArgs {
+    /// Remote file path(s) to display
+    #[arg(value_name = "PATH", value_parser = parse_validated_path)]
+    pub paths: Vec<String>,
+
+    /// Number of lines to display from the end
+    #[arg(short = 'n', long, conflicts_with = "bytes")]
+    pub lines: Option<usize>,
+
+    /// Number of bytes to display from the end
+    #[arg(short = 'c', long, conflicts_with = "lines")]
+    pub bytes: Option<usize>,
+
+    /// Do not print headers for multiple files
+    #[arg(short = 'q', long, conflicts_with = "verbose")]
+    pub quiet: bool,
+
+    /// Always print headers
+    #[arg(short = 'v', long, conflicts_with = "quiet")]
+    pub verbose: bool,
+}
+
 pub async fn run(args: Args, client: StorageClient) -> Result<()> {
     match args.command {
         Commands::Ls(ls_args) => {
@@ -272,6 +297,26 @@ pub async fn run(args: Args, client: StorageClient) -> Result<()> {
                         head_args.bytes,
                         head_args.quiet,
                         head_args.verbose,
+                    )
+                    .await?;
+            }
+        }
+        Commands::Tail(tail_args) => {
+            if tail_args.paths.len() <= 1 {
+                let path = tail_args.paths.first().ok_or_else(|| Error::InvalidPath {
+                    path: "".to_string(),
+                })?;
+                client
+                    .tail_file(path, tail_args.lines, tail_args.bytes)
+                    .await?;
+            } else {
+                client
+                    .tail_files(
+                        &tail_args.paths,
+                        tail_args.lines,
+                        tail_args.bytes,
+                        tail_args.quiet,
+                        tail_args.verbose,
                     )
                     .await?;
             }

@@ -15,10 +15,11 @@ use self::operations::head::OpenDalHeadReader;
 use self::operations::list::OpenDalLister;
 use self::operations::mkdir::OpenDalMkdirer;
 use self::operations::mv::OpenDalMover;
+use self::operations::tail::OpenDalTailReader;
 use self::operations::upload::OpenDalUploader;
 use self::operations::usage::OpenDalUsageCalculator;
 use self::operations::{
-    Cater, Copier, Deleter, Downloader, Header, Lister, Mkdirer, Mover, Stater, Uploader,
+    Cater, Copier, Deleter, Downloader, Header, Lister, Mkdirer, Mover, Stater, Tailer, Uploader,
     UsageCalculator,
 };
 use crate::wrap_err;
@@ -455,6 +456,77 @@ impl StorageClient {
                 path: paths.iter().take(5).cloned().collect::<Vec<_>>().join(",")
             }
         )
+    }
+
+    pub async fn tail_file(
+        &self,
+        path: &str,
+        lines: Option<usize>,
+        bytes: Option<usize>,
+    ) -> Result<()> {
+        log::debug!(
+            "tail_file provider={:?} path={} lines={:?} bytes={:?}",
+            self.provider,
+            path,
+            lines,
+            bytes
+        );
+        let reader = OpenDalTailReader::new(self.operator.clone());
+        wrap_err!(
+            reader.tail(path, lines, bytes).await,
+            TailFailed {
+                path: path.to_string()
+            }
+        )
+    }
+
+    pub async fn tail_files(
+        &self,
+        paths: &[String],
+        lines: Option<usize>,
+        bytes: Option<usize>,
+        quiet: bool,
+        verbose: bool,
+    ) -> Result<()> {
+        log::debug!(
+            "tail_files provider={:?} paths_count={} lines={:?} bytes={:?} quiet={} verbose={}",
+            self.provider,
+            paths.len(),
+            lines,
+            bytes,
+            quiet,
+            verbose
+        );
+        let reader = OpenDalTailReader::new(self.operator.clone());
+        // Implement tail_many locally to align with head_many's behavior
+        if quiet && verbose {
+            return Err(Error::InvalidArgument {
+                message: "Cannot specify both --quiet and --verbose".to_string(),
+            });
+        }
+        let should_show_header = |total: usize| -> bool {
+            if verbose {
+                return true;
+            }
+            if quiet {
+                return false;
+            }
+            total > 1
+        };
+        let total = paths.len();
+        for (idx, p) in paths.iter().enumerate() {
+            let show_header = should_show_header(total);
+            if show_header {
+                if idx > 0 {
+                    println!();
+                }
+                println!("==> {} <==", p);
+            }
+            if let Err(e) = reader.tail(p, lines, bytes).await {
+                eprintln!("{}", e);
+            }
+        }
+        Ok(())
     }
 
     pub async fn stat_metadata(&self, path: &str, format: OutputFormat) -> Result<()> {

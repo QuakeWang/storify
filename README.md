@@ -100,6 +100,16 @@ storify head file1 file2           # headers printed by default
 storify head -q file1 file2        # suppress headers
 storify head -v path/to/file       # always print header (even single file)
 
+# Display end of file contents
+storify tail path/to/file          # last 10 lines (default)
+storify tail -n 10 path/to/file    # last 10 lines
+storify tail -c 2048 path/to/file  # last 2048 bytes
+
+# Multiple files and headers (tail)
+storify tail file1 file2           # headers printed by default
+storify tail -q file1 file2        # suppress headers
+storify tail -v path/to/file       # always print header (even single file)
+
 # Show disk usage
 storify du path/to/dir
 storify du path/to/dir -s          # summary only
@@ -126,6 +136,7 @@ storify stat path/to/file --json    # JSON output
 | `mkdir` | Create directories | `-p` (parents) |
 | `cat` | Display file contents | |
 | `head` | Display beginning of file contents | `-n` (lines), `-c` (bytes), `-q` (quiet), `-v` (verbose) |
+| `tail` | Display end of file contents | `-n` (lines), `-c` (bytes), `-q` (quiet), `-v` (verbose) |
 | `rm` | Delete files/directories | `-R` (recursive), `-f` (force) |
 | `du` | Show disk usage | `-s` (summary only) |
 | `stat` | Show object metadata | `--json`, `--raw` |
