@@ -65,7 +65,7 @@ impl OpenDalTailReader {
         if bytes == 0 {
             return Ok(());
         }
-        let to_read = std::cmp::min(bytes as u64, file_size) as u64;
+        let to_read = std::cmp::min(bytes as u64, file_size);
         if to_read == 0 {
             return Ok(());
         }
@@ -139,19 +139,17 @@ impl OpenDalTailReader {
         }
 
         let start_index = if ends_with_newline {
-            if newline_positions.len() >= max_lines + 1 {
+            if newline_positions.len() > max_lines {
                 let idx = newline_positions[newline_positions.len() - (max_lines + 1)];
                 idx + 1
             } else {
                 0
             }
+        } else if newline_positions.len() >= max_lines {
+            let idx = newline_positions[newline_positions.len() - max_lines];
+            idx + 1
         } else {
-            if newline_positions.len() >= max_lines {
-                let idx = newline_positions[newline_positions.len() - max_lines];
-                idx + 1
-            } else {
-                0
-            }
+            0
         };
 
         let stdout = io::stdout();
