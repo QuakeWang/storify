@@ -498,7 +498,6 @@ impl StorageClient {
             verbose
         );
         let reader = OpenDalTailReader::new(self.operator.clone());
-        // Implement tail_many locally to align with head_many's behavior
         if quiet && verbose {
             return Err(Error::InvalidArgument {
                 message: "Cannot specify both --quiet and --verbose".to_string(),
@@ -527,6 +526,28 @@ impl StorageClient {
             }
         }
         Ok(())
+    }
+
+    pub async fn tail_file_follow(
+        &self,
+        path: &str,
+        lines: Option<usize>,
+        bytes: Option<usize>,
+    ) -> Result<()> {
+        log::debug!(
+            "tail_file_follow provider={:?} path={} lines={:?} bytes={:?}",
+            self.provider,
+            path,
+            lines,
+            bytes
+        );
+        let reader = OpenDalTailReader::new(self.operator.clone());
+        wrap_err!(
+            reader.tail_follow(path, lines, bytes, 500).await,
+            TailFailed {
+                path: path.to_string()
+            }
+        )
     }
 
     pub async fn stat_metadata(&self, path: &str, format: OutputFormat) -> Result<()> {

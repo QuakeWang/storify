@@ -13,7 +13,9 @@ pub fn tests(client: &StorageClient, tests: &mut Vec<Trial>) {
         test_tail_nonexistent_file,
         test_tail_multi_files_with_headers,
         test_tail_multi_files_quiet,
-        test_tail_multi_files_verbose
+        test_tail_multi_files_verbose,
+        test_tail_follow_append_growth,
+        test_tail_follow_truncate_and_rewrite
     ));
 }
 
@@ -214,5 +216,72 @@ async fn test_tail_multi_files_verbose(_client: StorageClient) -> Result<()> {
     let out = String::from_utf8_lossy(&assert.get_output().stdout);
     assert!(out.contains(&format!("==> {} <==", remote1)));
     assert!(out.contains(&format!("==> {} <==", remote2)));
+    Ok(())
+}
+
+async fn test_tail_follow_append_growth(_client: StorageClient) -> Result<()> {
+    let initial = b"A\n";
+    let tmp = create_temp_file_with_content(initial);
+    let dest_prefix = TEST_FIXTURE.new_file_path();
+    let remote_path = upload_and_remote_path(&tmp, &dest_prefix);
+
+    std::fs::write(&tmp, b"A\nB\nC\n").expect("rewrite local file");
+    storify_cmd()
+        .arg("put")
+        .arg(&tmp)
+        .arg(&dest_prefix)
+        .assert()
+        .success();
+
+    use std::process::Stdio;
+    let mut child = storify_cmd()
+        .arg("tail")
+        .arg("-f")
+        .arg("-n")
+        .arg("2")
+        .arg(&remote_path)
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("spawn tail -f");
+
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let _ = child.kill();
+    let output = child.wait_with_output().expect("wait output");
+    let s = String::from_utf8_lossy(&output.stdout);
+    assert!(s.contains("B\n") || s.contains("C\n"));
+    Ok(())
+}
+
+async fn test_tail_follow_truncate_and_rewrite(_client: StorageClient) -> Result<()> {
+    let lines: Vec<String> = (1..=20).map(|i| format!("L{i}")).collect();
+    let initial = (lines.join("\n") + "\n").into_bytes();
+    let tmp = create_temp_file_with_content(&initial);
+    let dest_prefix = TEST_FIXTURE.new_file_path();
+    let remote_path = upload_and_remote_path(&tmp, &dest_prefix);
+
+    std::fs::write(&tmp, b"X\nY\nZ\n").expect("rewrite local file");
+    storify_cmd()
+        .arg("put")
+        .arg(&tmp)
+        .arg(&dest_prefix)
+        .assert()
+        .success();
+
+    use std::process::Stdio;
+    let mut child = storify_cmd()
+        .arg("tail")
+        .arg("-f")
+        .arg("-n")
+        .arg("2")
+        .arg(&remote_path)
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("spawn tail -f");
+
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let _ = child.kill();
+    let output = child.wait_with_output().expect("wait output");
+    let s = String::from_utf8_lossy(&output.stdout);
+    assert!(s.contains("Y\n") || s.contains("Z\n"));
     Ok(())
 }

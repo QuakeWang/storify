@@ -56,8 +56,59 @@ impl OpenDalTailReader {
         };
 
         match mode {
-            TailMode::Lines(line_count) => self.tail_by_lines(path, line_count, file_size).await,
-            TailMode::Bytes(byte_count) => self.tail_by_bytes(path, byte_count, file_size).await,
+            TailMode::Lines(line_count) => self.tail_by_lines(path, line_count, file_size).await?,
+            TailMode::Bytes(byte_count) => self.tail_by_bytes(path, byte_count, file_size).await?,
+        }
+        Ok(())
+    }
+
+    /// Follow a single file by polling and printing new appended bytes.
+    pub async fn tail_follow(
+        &self,
+        path: &str,
+        lines: Option<usize>,
+        bytes: Option<usize>,
+        poll_interval_ms: u64,
+    ) -> Result<()> {
+        // Initial dump
+        self.read_and_display_tail(path, lines, bytes).await?;
+
+        // Start offset is current size
+        let mut offset = match self.operator.stat(path).await {
+            Ok(m) => m.content_length(),
+            Err(e) => {
+                if e.kind() == opendal::ErrorKind::NotFound {
+                    0
+                } else {
+                    return Err(self.map_to_tail_failed(path, e));
+                }
+            }
+        };
+
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(poll_interval_ms)).await;
+            let Ok(meta) = self.operator.stat(path).await else {
+                continue;
+            };
+            let size_new = meta.content_length();
+
+            if size_new > offset {
+                let data = self
+                    .operator
+                    .read_with(path)
+                    .range(offset..size_new)
+                    .await
+                    .map_err(|e| self.map_to_tail_failed(path, e))?;
+                let stdout = io::stdout();
+                let mut handle = stdout.lock();
+                self.write_all_handle(path, &mut handle, &data.to_vec())?;
+                self.flush_handle(path, &mut handle)?;
+                offset = size_new;
+            } else if size_new < offset {
+                // Truncated or replaced: reprint last N lines/bytes
+                self.read_and_display_tail(path, lines, bytes).await?;
+                offset = size_new;
+            }
         }
     }
 
@@ -91,8 +142,8 @@ impl OpenDalTailReader {
 
         const CHUNK_SIZE: u64 = 8192;
         let mut remain_end = file_size;
-        let mut buffer: Vec<u8> = Vec::new();
-        let mut newline_positions: Vec<usize> = Vec::new();
+        // Collect absolute newline offsets (in ascending order)
+        let mut newline_offsets: Vec<u64> = Vec::new();
 
         // Check if file ends with a newline
         let ends_with_newline = {
@@ -112,7 +163,7 @@ impl OpenDalTailReader {
             max_lines
         };
 
-        while remain_end > 0 && newline_positions.len() < needed_newlines {
+        while remain_end > 0 && newline_offsets.len() < needed_newlines {
             let start = remain_end.saturating_sub(CHUNK_SIZE);
             let end = remain_end;
             let chunk = self
@@ -122,39 +173,53 @@ impl OpenDalTailReader {
                 .await
                 .map_err(|e| self.map_to_tail_failed(path, e))?;
 
-            // prepend chunk to buffer
-            let mut newbuf = chunk.to_vec();
-            newbuf.extend_from_slice(&buffer);
-            buffer = newbuf;
-
-            // recompute newline positions
-            newline_positions.clear();
-            for (i, b) in buffer.iter().enumerate() {
-                if *b == b'\n' {
-                    newline_positions.push(i);
+            // scan only the newly read chunk for newlines and merge in front
+            if !chunk.is_empty() {
+                let data = chunk.to_vec();
+                let mut chunk_newlines: Vec<u64> = Vec::new();
+                for (i, b) in data.iter().enumerate() {
+                    if *b == b'\n' {
+                        chunk_newlines.push(start + i as u64);
+                    }
+                }
+                if !chunk_newlines.is_empty() {
+                    let mut merged =
+                        Vec::with_capacity(chunk_newlines.len() + newline_offsets.len());
+                    merged.extend_from_slice(&chunk_newlines);
+                    merged.extend_from_slice(&newline_offsets);
+                    newline_offsets = merged;
                 }
             }
 
             remain_end = start;
         }
 
-        let start_index = if ends_with_newline {
-            if newline_positions.len() > max_lines {
-                let idx = newline_positions[newline_positions.len() - (max_lines + 1)];
-                idx + 1
+        // Determine start offset based on collected newline offsets
+        let start_offset: u64 = if ends_with_newline {
+            if newline_offsets.len() > max_lines {
+                newline_offsets[newline_offsets.len() - (max_lines + 1)] + 1
             } else {
                 0
             }
-        } else if newline_positions.len() >= max_lines {
-            let idx = newline_positions[newline_positions.len() - max_lines];
-            idx + 1
+        } else if newline_offsets.len() >= max_lines {
+            newline_offsets[newline_offsets.len() - max_lines] + 1
         } else {
             0
         };
 
+        // Read the tail once from start_offset to EOF and output
+        if start_offset >= file_size {
+            return Ok(());
+        }
+        let data = self
+            .operator
+            .read_with(path)
+            .range(start_offset..file_size)
+            .await
+            .map_err(|e| self.map_to_tail_failed(path, e))?;
         let stdout = io::stdout();
         let mut handle = stdout.lock();
-        self.write_all_handle(path, &mut handle, &buffer[start_index..])?;
+        self.write_all_handle(path, &mut handle, &data.to_vec())?;
         self.flush_handle(path, &mut handle)
     }
 

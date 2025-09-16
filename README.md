@@ -109,6 +109,7 @@ storify tail -c 2048 path/to/file  # last 2048 bytes
 storify tail file1 file2           # headers printed by default
 storify tail -q file1 file2        # suppress headers
 storify tail -v path/to/file       # always print header (even single file)
+storify tail -f path/to/file       # follow file as it grows (single file only)
 
 # Show disk usage
 storify du path/to/dir
@@ -136,7 +137,7 @@ storify stat path/to/file --json    # JSON output
 | `mkdir` | Create directories | `-p` (parents) |
 | `cat` | Display file contents | |
 | `head` | Display beginning of file contents | `-n` (lines), `-c` (bytes), `-q` (quiet), `-v` (verbose) |
-| `tail` | Display end of file contents | `-n` (lines), `-c` (bytes), `-q` (quiet), `-v` (verbose) |
+| `tail` | Display end of file contents | `-n` (lines), `-c` (bytes), `-q` (quiet), `-v` (verbose), `-f` (follow) |
 | `rm` | Delete files/directories | `-R` (recursive), `-f` (force) |
 | `du` | Show disk usage | `-s` (summary only) |
 | `stat` | Show object metadata | `--json`, `--raw` |
