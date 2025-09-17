@@ -528,28 +528,6 @@ impl StorageClient {
         Ok(())
     }
 
-    pub async fn tail_file_follow(
-        &self,
-        path: &str,
-        lines: Option<usize>,
-        bytes: Option<usize>,
-    ) -> Result<()> {
-        log::debug!(
-            "tail_file_follow provider={:?} path={} lines={:?} bytes={:?}",
-            self.provider,
-            path,
-            lines,
-            bytes
-        );
-        let reader = OpenDalTailReader::new(self.operator.clone());
-        wrap_err!(
-            reader.tail_follow(path, lines, bytes, 500).await,
-            TailFailed {
-                path: path.to_string()
-            }
-        )
-    }
-
     pub async fn stat_metadata(&self, path: &str, format: OutputFormat) -> Result<()> {
         log::debug!(
             "stat_metadata provider={:?} path={} format={:?}",

@@ -56,60 +56,14 @@ impl OpenDalTailReader {
         };
 
         match mode {
-            TailMode::Lines(line_count) => self.tail_by_lines(path, line_count, file_size).await?,
-            TailMode::Bytes(byte_count) => self.tail_by_bytes(path, byte_count, file_size).await?,
+            TailMode::Lines(line_count) => {
+                self.tail_by_lines(path, line_count, file_size).await?;
+            }
+            TailMode::Bytes(byte_count) => {
+                self.tail_by_bytes(path, byte_count, file_size).await?;
+            }
         }
         Ok(())
-    }
-
-    /// Follow a single file by polling and printing new appended bytes.
-    pub async fn tail_follow(
-        &self,
-        path: &str,
-        lines: Option<usize>,
-        bytes: Option<usize>,
-        poll_interval_ms: u64,
-    ) -> Result<()> {
-        // Initial dump
-        self.read_and_display_tail(path, lines, bytes).await?;
-
-        // Start offset is current size
-        let mut offset = match self.operator.stat(path).await {
-            Ok(m) => m.content_length(),
-            Err(e) => {
-                if e.kind() == opendal::ErrorKind::NotFound {
-                    0
-                } else {
-                    return Err(self.map_to_tail_failed(path, e));
-                }
-            }
-        };
-
-        loop {
-            tokio::time::sleep(std::time::Duration::from_millis(poll_interval_ms)).await;
-            let Ok(meta) = self.operator.stat(path).await else {
-                continue;
-            };
-            let size_new = meta.content_length();
-
-            if size_new > offset {
-                let data = self
-                    .operator
-                    .read_with(path)
-                    .range(offset..size_new)
-                    .await
-                    .map_err(|e| self.map_to_tail_failed(path, e))?;
-                let stdout = io::stdout();
-                let mut handle = stdout.lock();
-                self.write_all_handle(path, &mut handle, &data.to_vec())?;
-                self.flush_handle(path, &mut handle)?;
-                offset = size_new;
-            } else if size_new < offset {
-                // Truncated or replaced: reprint last N lines/bytes
-                self.read_and_display_tail(path, lines, bytes).await?;
-                offset = size_new;
-            }
-        }
     }
 
     async fn tail_by_bytes(&self, path: &str, bytes: usize, file_size: u64) -> Result<()> {

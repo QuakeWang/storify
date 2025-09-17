@@ -229,10 +229,6 @@ pub struct TailArgs {
     /// Always print headers
     #[arg(short = 'v', long, conflicts_with = "quiet")]
     pub verbose: bool,
-
-    /// Follow the file as it grows
-    #[arg(short = 'f', long)]
-    pub follow: bool,
 }
 
 pub async fn run(args: Args, client: StorageClient) -> Result<()> {
@@ -310,21 +306,10 @@ pub async fn run(args: Args, client: StorageClient) -> Result<()> {
                 let path = tail_args.paths.first().ok_or_else(|| Error::InvalidPath {
                     path: "".to_string(),
                 })?;
-                if tail_args.follow {
-                    client
-                        .tail_file_follow(path, tail_args.lines, tail_args.bytes)
-                        .await?;
-                } else {
-                    client
-                        .tail_file(path, tail_args.lines, tail_args.bytes)
-                        .await?;
-                }
+                client
+                    .tail_file(path, tail_args.lines, tail_args.bytes)
+                    .await?;
             } else {
-                if tail_args.follow {
-                    return Err(Error::InvalidArgument {
-                        message: "--follow only supports a single file".to_string(),
-                    });
-                }
                 client
                     .tail_files(
                         &tail_args.paths,
