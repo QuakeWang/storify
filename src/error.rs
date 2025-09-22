@@ -79,6 +79,9 @@ pub enum Error {
     #[snafu(display("Failed to read head of file '{path}': {source}"))]
     HeadFailed { path: String, source: Box<Error> },
 
+    #[snafu(display("Failed to read tail of file '{path}': {source}"))]
+    TailFailed { path: String, source: Box<Error> },
+
     #[snafu(display("Invalid argument: {message}"))]
     InvalidArgument { message: String },
 
