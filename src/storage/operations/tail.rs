@@ -3,6 +3,10 @@ use opendal::Operator;
 use std::io::{self, Write};
 use std::path::PathBuf;
 
+// Constants
+const DEFAULT_TAIL_LINES: usize = 10;
+const CHUNK_SIZE: u64 = 8192;
+
 /// Trait for displaying the end of file contents in object storage.
 pub trait Tailer {
     /// Display the end of file contents with optional size limits.
@@ -47,7 +51,7 @@ impl OpenDalTailReader {
         let mode = match (lines, bytes) {
             (Some(line_count), None) => TailMode::Lines(line_count),
             (None, Some(byte_count)) => TailMode::Bytes(byte_count),
-            (None, None) => TailMode::Lines(10),
+            (None, None) => TailMode::Lines(DEFAULT_TAIL_LINES),
             (Some(_), Some(_)) => {
                 return Err(Error::InvalidArgument {
                     message: "Cannot specify both lines and bytes options".to_string(),
@@ -94,21 +98,22 @@ impl OpenDalTailReader {
             return Ok(());
         }
 
-        const CHUNK_SIZE: u64 = 8192;
         let mut remain_end = file_size;
         // Collect absolute newline offsets (in ascending order)
         let mut newline_offsets: Vec<u64> = Vec::new();
 
         // Check if file ends with a newline
         let ends_with_newline = {
-            let last_byte = self
+            let last_byte_result = self
                 .operator
                 .read_with(path)
                 .range(file_size.saturating_sub(1)..file_size)
-                .await
-                .map(|d| d.to_vec())
-                .unwrap_or_default();
-            !last_byte.is_empty() && last_byte[0] == b'\n'
+                .await;
+
+            match last_byte_result {
+                Ok(data) => !data.is_empty() && data.to_vec()[0] == b'\n',
+                Err(_) => false, // If we can't read the last byte, assume no trailing newline
+            }
         };
 
         let needed_newlines = if ends_with_newline {
@@ -137,11 +142,9 @@ impl OpenDalTailReader {
                     }
                 }
                 if !chunk_newlines.is_empty() {
-                    let mut merged =
-                        Vec::with_capacity(chunk_newlines.len() + newline_offsets.len());
-                    merged.extend_from_slice(&chunk_newlines);
-                    merged.extend_from_slice(&newline_offsets);
-                    newline_offsets = merged;
+                    // More efficient: prepend chunk_newlines to newline_offsets
+                    chunk_newlines.extend(newline_offsets);
+                    newline_offsets = chunk_newlines;
                 }
             }
 
@@ -149,16 +152,20 @@ impl OpenDalTailReader {
         }
 
         // Determine start offset based on collected newline offsets
-        let start_offset: u64 = if ends_with_newline {
-            if newline_offsets.len() > max_lines {
-                newline_offsets[newline_offsets.len() - (max_lines + 1)] + 1
+        let start_offset: u64 = {
+            let required_newlines = if ends_with_newline {
+                max_lines + 1
             } else {
+                max_lines
+            };
+
+            if newline_offsets.len() >= required_newlines {
+                // Get the offset after the (len - required_newlines)-th newline
+                newline_offsets[newline_offsets.len() - required_newlines] + 1
+            } else {
+                // Not enough newlines found, start from beginning
                 0
             }
-        } else if newline_offsets.len() >= max_lines {
-            newline_offsets[newline_offsets.len() - max_lines] + 1
-        } else {
-            0
         };
 
         // Read the tail once from start_offset to EOF and output
