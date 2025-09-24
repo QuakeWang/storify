@@ -2,6 +2,14 @@ use crate::error::{Error, Result};
 use opendal::Operator;
 use std::io::{self, Write};
 
+struct GrepOptions<'a, W: Write> {
+    path: &'a str,
+    needle: &'a str,
+    ignore_case: bool,
+    line_number: bool,
+    handle: &'a mut W,
+}
+
 /// Trait for searching patterns in files.
 pub trait Greper {
     /// Search for lines matching pattern in file and print matches.
@@ -65,6 +73,14 @@ impl OpenDalGreper {
         // If file_size == 0, the object may be empty or provider doesn't expose size.
         // We still attempt ranged reads in fixed chunks until EOF.
         let known_size = file_size > 0;
+        let mut opts = GrepOptions {
+            path,
+            needle: &needle,
+            ignore_case,
+            line_number,
+            handle: &mut handle,
+        };
+
         loop {
             let data = if known_size {
                 if next_offset >= file_size {
@@ -122,15 +138,7 @@ impl OpenDalGreper {
                     }
 
                     line_no += 1;
-                    self.process_line(
-                        path,
-                        &needle,
-                        ignore_case,
-                        line_number,
-                        line_no,
-                        line_bytes,
-                        &mut handle,
-                    )?;
+                    self.process_line(&mut opts, line_no, line_bytes)?;
 
                     start = i + 1;
                 }
@@ -151,15 +159,7 @@ impl OpenDalGreper {
                 line_bytes = &line_bytes[..line_bytes.len() - 1];
             }
             line_no += 1;
-            self.process_line(
-                path,
-                &needle,
-                ignore_case,
-                line_number,
-                line_no,
-                line_bytes,
-                &mut handle,
-            )?;
+            self.process_line(&mut opts, line_no, line_bytes)?;
         }
 
         self.flush_handle(path, &mut handle)
@@ -167,31 +167,35 @@ impl OpenDalGreper {
 
     fn process_line<W: Write>(
         &self,
-        path: &str,
-        needle: &str,
-        ignore_case: bool,
-        line_number: bool,
+        opts: &mut GrepOptions<W>,
         line_no: usize,
         line_bytes: &[u8],
-        handle: &mut W,
     ) -> Result<()> {
         let line = String::from_utf8_lossy(line_bytes);
         // Optimize ASCII fast-path for case-insensitive checks without allocations
-        let matched = if ignore_case {
-            if line.is_ascii() && needle.is_ascii() {
-                Self::ascii_contains_case_insensitive(line.as_bytes(), needle.as_bytes())
+        let matched = if opts.ignore_case {
+            if line.is_ascii() && opts.needle.is_ascii() {
+                Self::ascii_contains_case_insensitive(line.as_bytes(), opts.needle.as_bytes())
             } else {
-                line.to_lowercase().contains(needle)
+                line.to_lowercase().contains(opts.needle)
             }
         } else {
-            line.contains(needle)
+            line.contains(opts.needle)
         };
 
         if matched {
-            if line_number {
-                self.write_all_handle(path, handle, format!("{}:{}\n", line_no, line).as_bytes())?;
+            if opts.line_number {
+                self.write_all_handle(
+                    opts.path,
+                    &mut opts.handle,
+                    format!("{}:{}\n", line_no, line).as_bytes(),
+                )?;
             } else {
-                self.write_all_handle(path, handle, format!("{}\n", line).as_bytes())?;
+                self.write_all_handle(
+                    opts.path,
+                    &mut opts.handle,
+                    format!("{}\n", line).as_bytes(),
+                )?;
             }
         }
         Ok(())
