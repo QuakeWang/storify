@@ -54,6 +54,8 @@ pub enum Commands {
     Head(HeadArgs),
     /// Display end of file contents
     Tail(TailArgs),
+    /// Search for patterns in files
+    Grep(GrepArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -231,6 +233,24 @@ pub struct TailArgs {
     pub verbose: bool,
 }
 
+#[derive(Parser, Debug)]
+pub struct GrepArgs {
+    /// Pattern to search for
+    pub pattern: String,
+
+    /// The remote file path to search
+    #[arg(value_name = "PATH", value_parser = parse_validated_path)]
+    pub path: String,
+
+    /// Case insensitive search
+    #[arg(short = 'i', long = "ignore-case")]
+    pub ignore_case: bool,
+
+    /// Show line numbers
+    #[arg(short = 'n', long = "line-number")]
+    pub line_number: bool,
+}
+
 pub async fn run(args: Args, client: StorageClient) -> Result<()> {
     match args.command {
         Commands::Ls(ls_args) => {
@@ -330,6 +350,16 @@ pub async fn run(args: Args, client: StorageClient) -> Result<()> {
                 OutputFormat::Human
             };
             client.stat_metadata(&stat_args.path, format).await?;
+        }
+        Commands::Grep(grep_args) => {
+            client
+                .grep_file(
+                    &grep_args.path,
+                    &grep_args.pattern,
+                    grep_args.ignore_case,
+                    grep_args.line_number,
+                )
+                .await?;
         }
     }
     Ok(())

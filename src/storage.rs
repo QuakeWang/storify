@@ -11,6 +11,7 @@ use self::operations::cat::OpenDalFileReader;
 use self::operations::copy::OpenDalCopier;
 use self::operations::delete::OpenDalDeleter;
 use self::operations::download::OpenDalDownloader;
+use self::operations::grep::OpenDalGreper;
 use self::operations::head::OpenDalHeadReader;
 use self::operations::list::OpenDalLister;
 use self::operations::mkdir::OpenDalMkdirer;
@@ -19,8 +20,8 @@ use self::operations::tail::OpenDalTailReader;
 use self::operations::upload::OpenDalUploader;
 use self::operations::usage::OpenDalUsageCalculator;
 use self::operations::{
-    Cater, Copier, Deleter, Downloader, Header, Lister, Mkdirer, Mover, Stater, Tailer, Uploader,
-    UsageCalculator,
+    Cater, Copier, Deleter, Downloader, Greper, Header, Lister, Mkdirer, Mover, Stater, Tailer,
+    Uploader, UsageCalculator,
 };
 use crate::wrap_err;
 
@@ -590,5 +591,29 @@ impl StorageClient {
         }
 
         Ok(())
+    }
+
+    pub async fn grep_file(
+        &self,
+        path: &str,
+        pattern: &str,
+        ignore_case: bool,
+        line_number: bool,
+    ) -> Result<()> {
+        log::debug!(
+            "grep_file provider={:?} path={} pattern={} ignore_case={} line_number={}",
+            self.provider,
+            path,
+            pattern,
+            ignore_case,
+            line_number
+        );
+        let greper = OpenDalGreper::new(self.operator.clone());
+        wrap_err!(
+            greper.grep(path, pattern, ignore_case, line_number).await,
+            GrepFailed {
+                path: path.to_string()
+            }
+        )
     }
 }
