@@ -122,6 +122,11 @@ storify rm path/to/dir -R          # recursive
 storify stat path/to/file           # human-readable
 storify stat path/to/file --raw     # raw key=value lines (compat with opendal-mkdir)
 storify stat path/to/file --json    # JSON output
+
+# Search for patterns in a remote file
+storify grep "pattern" path/to/file       # Basic search
+storify grep -i "pattern" path/to/file      # Case-insensitive
+storify grep -n "pattern" path/to/file      # Show line numbers
 ```
 
 ## Command Reference
@@ -137,6 +142,7 @@ storify stat path/to/file --json    # JSON output
 | `cat` | Display file contents | |
 | `head` | Display beginning of file contents | `-n` (lines), `-c` (bytes), `-q` (quiet), `-v` (verbose) |
 | `tail` | Display end of file contents | `-n` (lines), `-c` (bytes), `-q` (quiet), `-v` (verbose)|
+| `grep` | Search for patterns in a remote file | `-n` (line), `-i` (ignore)|
 | `rm` | Delete files/directories | `-R` (recursive), `-f` (force) |
 | `du` | Show disk usage | `-s` (summary only) |
 | `stat` | Show object metadata | `--json`, `--raw` |
