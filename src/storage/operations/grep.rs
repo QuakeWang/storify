@@ -81,6 +81,9 @@ impl OpenDalGreper {
             handle: &mut handle,
         };
 
+        // Tracks EOF for unknown-size reads when we observe a short read
+        let mut reached_eof: bool = false;
+
         loop {
             let data = if known_size {
                 if next_offset >= file_size {
@@ -99,15 +102,33 @@ impl OpenDalGreper {
                 next_offset = end_offset;
                 d
             } else {
-                let end_offset = next_offset + CHUNK_SIZE;
-                let d = self
+                let start_offset = next_offset;
+                let end_offset = start_offset + CHUNK_SIZE;
+                match self
                     .operator
                     .read_with(path)
-                    .range(next_offset..end_offset)
+                    .range(start_offset..end_offset)
                     .await
-                    .map_err(|e| self.map_to_grep_failed(path, e))?;
-                next_offset = end_offset;
-                d
+                {
+                    Ok(d) => {
+                        // If provider doesn't expose size, a short read indicates EOF
+                        let requested = end_offset - start_offset;
+                        next_offset = end_offset;
+                        if (d.len() as u64) < requested {
+                            reached_eof = true;
+                        }
+                        d
+                    }
+                    Err(e) => {
+                        // Treat Range Not Satisfied (HTTP 416) as EOF instead of failure
+                        if e.kind() == opendal::ErrorKind::RangeNotSatisfied {
+                            reached_eof = true;
+                            opendal::Buffer::from(Vec::<u8>::new())
+                        } else {
+                            return Err(self.map_to_grep_failed(path, e));
+                        }
+                    }
+                }
             };
 
             let chunk = data.to_vec();
@@ -150,6 +171,10 @@ impl OpenDalGreper {
             } else {
                 Vec::new()
             };
+
+            if reached_eof {
+                break;
+            }
         }
 
         // Process leftover as the final line (no trailing newline)
