@@ -498,34 +498,12 @@ impl StorageClient {
             verbose
         );
         let reader = OpenDalTailReader::new(self.operator.clone());
-        if quiet && verbose {
-            return Err(Error::InvalidArgument {
-                message: "Cannot specify both --quiet and --verbose".to_string(),
-            });
-        }
-        let should_show_header = |total: usize| -> bool {
-            if verbose {
-                return true;
+        wrap_err!(
+            reader.tail_many(paths, lines, bytes, quiet, verbose).await,
+            TailFailed {
+                path: paths.iter().take(5).cloned().collect::<Vec<_>>().join(",")
             }
-            if quiet {
-                return false;
-            }
-            total > 1
-        };
-        let total = paths.len();
-        for (idx, p) in paths.iter().enumerate() {
-            let show_header = should_show_header(total);
-            if show_header {
-                if idx > 0 {
-                    println!();
-                }
-                println!("==> {} <==", p);
-            }
-            if let Err(e) = reader.tail(p, lines, bytes).await {
-                eprintln!("{}", e);
-            }
-        }
-        Ok(())
+        )
     }
 
     pub async fn stat_metadata(&self, path: &str, format: OutputFormat) -> Result<()> {

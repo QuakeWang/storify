@@ -70,6 +70,49 @@ impl OpenDalTailReader {
         Ok(())
     }
 
+    /// Display the end of multiple files with GNU tail-like headers.
+    pub async fn tail_many(
+        &self,
+        paths: &[String],
+        lines: Option<usize>,
+        bytes: Option<usize>,
+        quiet: bool,
+        verbose: bool,
+    ) -> Result<()> {
+        if quiet && verbose {
+            return Err(Error::InvalidArgument {
+                message: "Cannot specify both --quiet and --verbose".to_string(),
+            });
+        }
+
+        let should_show_header = |total: usize| -> bool {
+            if verbose {
+                return true;
+            }
+            if quiet {
+                return false;
+            }
+            total > 1
+        };
+
+        let total = paths.len();
+        for (idx, p) in paths.iter().enumerate() {
+            let show_header = should_show_header(total);
+            if show_header {
+                if idx > 0 {
+                    println!();
+                }
+                println!("==> {} <==", p);
+            }
+
+            if let Err(e) = self.read_and_display_tail(p, lines, bytes).await {
+                eprintln!("{}", e);
+            }
+        }
+
+        Ok(())
+    }
+
     async fn tail_by_bytes(&self, path: &str, bytes: usize, file_size: u64) -> Result<()> {
         if bytes == 0 {
             return Ok(());
