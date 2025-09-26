@@ -1,6 +1,7 @@
+use crate::config::prepare_storage_config;
+pub use crate::config::{StorageProvider, storage_config::StorageConfig};
 use crate::error::{Error, Result};
 use opendal::Operator;
-use std::str::FromStr;
 
 pub mod constants;
 mod operations;
@@ -25,128 +26,6 @@ use self::operations::{
 };
 use crate::wrap_err;
 
-/// Storage provider types
-#[derive(Debug, Clone, Copy)]
-pub enum StorageProvider {
-    Oss,
-    S3,
-    Cos,
-    Fs,
-    Hdfs,
-}
-
-impl FromStr for StorageProvider {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        match s.to_lowercase().as_str() {
-            "oss" => Ok(Self::Oss),
-            "s3" | "minio" => Ok(Self::S3),
-            "cos" => Ok(Self::Cos),
-            "fs" => Ok(Self::Fs),
-            "hdfs" => Ok(Self::Hdfs),
-            _ => Err(Error::UnsupportedProvider {
-                provider: s.to_string(),
-            }),
-        }
-    }
-}
-
-/// Unified storage configuration for different providers
-#[derive(Debug, Clone)]
-pub struct StorageConfig {
-    pub provider: StorageProvider,
-    pub bucket: String,
-    pub access_key_id: Option<String>,
-    pub access_key_secret: Option<String>,
-    pub endpoint: Option<String>,
-    pub region: Option<String>,
-    pub root_path: Option<String>,
-    pub name_node: Option<String>,
-}
-
-impl StorageConfig {
-    pub fn oss(
-        bucket: String,
-        access_key_id: String,
-        access_key_secret: String,
-        region: Option<String>,
-    ) -> Self {
-        Self {
-            provider: StorageProvider::Oss,
-            bucket,
-            access_key_id: Some(access_key_id),
-            access_key_secret: Some(access_key_secret),
-            endpoint: None,
-            region,
-            root_path: None,
-            name_node: None,
-        }
-    }
-
-    pub fn s3(
-        bucket: String,
-        access_key_id: String,
-        secret_access_key: String,
-        region: Option<String>,
-    ) -> Self {
-        Self {
-            provider: StorageProvider::S3,
-            bucket,
-            access_key_id: Some(access_key_id),
-            access_key_secret: Some(secret_access_key),
-            endpoint: None,
-            region,
-            root_path: None,
-            name_node: None,
-        }
-    }
-
-    pub fn cos(
-        bucket: String,
-        secret_id: String,
-        secret_key: String,
-        region: Option<String>,
-    ) -> Self {
-        Self {
-            provider: StorageProvider::Cos,
-            bucket,
-            access_key_id: Some(secret_id),
-            access_key_secret: Some(secret_key),
-            endpoint: None,
-            region,
-            root_path: None,
-            name_node: None,
-        }
-    }
-
-    pub fn fs(root_path: String) -> Self {
-        Self {
-            provider: StorageProvider::Fs,
-            bucket: "local".to_string(),
-            access_key_id: None,
-            access_key_secret: None,
-            endpoint: None,
-            region: None,
-            root_path: Some(root_path),
-            name_node: None,
-        }
-    }
-
-    pub fn hdfs(name_node: String, root_path: String) -> Self {
-        Self {
-            provider: StorageProvider::Hdfs,
-            bucket: "hdfs".to_string(), // Bucket is not really used for HDFS
-            access_key_id: None,
-            access_key_secret: None,
-            endpoint: None,
-            region: None,
-            root_path: Some(root_path),
-            name_node: Some(name_node),
-        }
-    }
-}
-
 /// Unified storage client using OpenDAL
 #[derive(Clone)]
 pub struct StorageClient {
@@ -154,8 +33,20 @@ pub struct StorageClient {
     provider: StorageProvider,
 }
 
+fn require_field<'a>(
+    provider: StorageProvider,
+    field: &str,
+    value: Option<&'a str>,
+) -> Result<&'a str> {
+    value.ok_or_else(|| Error::MissingConfigField {
+        provider: provider.as_str().to_string(),
+        field: field.to_string(),
+    })
+}
+
 impl StorageClient {
-    pub async fn new(config: StorageConfig) -> Result<Self> {
+    pub async fn new(mut config: StorageConfig) -> Result<Self> {
+        prepare_storage_config(&mut config)?;
         let operator = Self::build_operator(&config)?;
         Ok(Self {
             operator,
@@ -172,9 +63,12 @@ impl StorageClient {
     }
 
     fn build_operator(config: &StorageConfig) -> Result<Operator> {
-        match &config.provider {
+        match config.provider {
             StorageProvider::Oss => {
                 let mut builder = opendal::services::Oss::default().bucket(&config.bucket);
+                if config.anonymous {
+                    builder = builder.allow_anonymous();
+                }
                 if let Some(access_key_id) = &config.access_key_id {
                     builder = builder.access_key_id(access_key_id);
                 }
@@ -188,6 +82,9 @@ impl StorageClient {
             }
             StorageProvider::S3 => {
                 let mut builder = opendal::services::S3::default().bucket(&config.bucket);
+                if config.anonymous {
+                    builder = builder.allow_anonymous();
+                }
                 if let Some(access_key_id) = &config.access_key_id {
                     builder = builder.access_key_id(access_key_id);
                 }
@@ -213,30 +110,31 @@ impl StorageClient {
                 }
                 if let Some(endpoint) = &config.endpoint {
                     builder = builder.endpoint(endpoint);
-                } else {
-                    builder = builder.endpoint("https://cos.myqcloud.com");
                 }
 
+                // COS credential fields are stored as access_key_id/access_key_secret and mapped to
+                // secret_id/secret_key when configuring the builder.
                 log::debug!(
-                    "COS builder config: bucket={}, endpoint={:?}, access_key_id={:?}, access_key_secret={:?}",
+                    "COS builder config: bucket={}, endpoint={:?}",
                     config.bucket,
                     config.endpoint,
-                    config.access_key_id,
-                    config.access_key_secret
                 );
 
                 Ok(Operator::new(builder)?.finish())
             }
             StorageProvider::Fs => {
-                let root = config.root_path.as_deref().unwrap_or("./");
+                let root =
+                    require_field(config.provider, "root_path", config.root_path.as_deref())?;
                 let builder = opendal::services::Fs::default().root(root);
                 Ok(Operator::new(builder)?.finish())
             }
             StorageProvider::Hdfs => {
                 #[cfg(feature = "hdfs")]
                 {
-                    let root = config.root_path.as_deref().unwrap_or("/");
-                    let name_node = config.name_node.as_deref().unwrap_or_default();
+                    let root =
+                        require_field(config.provider, "root_path", config.root_path.as_deref())?;
+                    let name_node =
+                        require_field(config.provider, "name_node", config.name_node.as_deref())?;
                     let builder = opendal::services::Hdfs::default()
                         .root(root)
                         .name_node(name_node);

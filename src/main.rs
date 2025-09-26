@@ -5,7 +5,7 @@ use storify::error::Result;
 use storify::storage::StorageClient;
 
 use storify::cli::Args;
-use storify::config::load_storage_config;
+use storify::config::loader::load_storage_config;
 
 #[tokio::main]
 async fn main() {

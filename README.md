@@ -38,6 +38,8 @@ export STORAGE_PROVIDER=oss
 
 # Common configuration
 export STORAGE_BUCKET=your-bucket
+
+# Credentials (optional for OSS/S3/MinIO, required for COS)
 export STORAGE_ACCESS_KEY_ID=your-access-key
 export STORAGE_ACCESS_KEY_SECRET=your-secret-key
 
@@ -59,7 +61,9 @@ AWS_S3_BUCKET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
 MINIO_BUCKET, MINIO_ACCESS_KEY, MINIO_SECRET_KEY
 
 # COS
-COS_BUCKET, COS_SECRET_ID, COS_SECRET_KEY
+COS_BUCKET *(or reuse STORAGE_BUCKET)*
+COS_SECRET_ID *(preferred; maps to STORAGE_ACCESS_KEY_ID)*
+COS_SECRET_KEY *(preferred; maps to STORAGE_ACCESS_KEY_SECRET)*
 
 # Filesystem
 STORAGE_ROOT_PATH=./storage

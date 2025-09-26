@@ -59,8 +59,10 @@ fn build_minio_config_from_env() -> Result<storify::storage::StorageConfig> {
         .ok()
         .unwrap_or_else(|| TEST_DEFAULT_ENDPOINT.to_string());
 
-    let mut config =
-        storify::storage::StorageConfig::s3(bucket, access_key_id, access_key_secret, Some(region));
+    let mut config = storify::storage::StorageConfig::s3(bucket);
+    config.access_key_id = Some(access_key_id);
+    config.access_key_secret = Some(access_key_secret);
+    config.region = Some(region);
     config.endpoint = Some(endpoint);
 
     Ok(config)

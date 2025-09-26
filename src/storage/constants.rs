@@ -8,4 +8,6 @@ pub const PROGRESS_UPDATE_INTERVAL: u64 = 100;
 
 // Filesystem default
 pub const DEFAULT_FS_ROOT: &str = "./storage";
+pub const DEFAULT_HDFS_ROOT: &str = "/";
+pub const DEFAULT_COS_ENDPOINT: &str = "https://cos.myqcloud.com";
 pub const CAT_CONFIRM_SIZE_THRESHOLD: u64 = 10 * 1024 * 1024;
