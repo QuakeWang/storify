@@ -9,8 +9,11 @@ pub enum Error {
     #[snafu(display("Environment variable '{key}' is required but not found"))]
     MissingEnvVar { key: String },
 
+    #[snafu(display("Missing required configuration field '{field}' for provider '{provider}'"))]
+    MissingConfigField { provider: String, field: String },
+
     #[snafu(display(
-        "Unsupported storage provider: {provider}. Allowed: 'oss' | 's3' | 'minio' | 'fs'"
+        "Unsupported storage provider: {provider}. Allowed: 'oss' | 's3' | 'minio' | 'cos' | 'fs' | 'hdfs'"
     ))]
     UnsupportedProvider { provider: String },
 
