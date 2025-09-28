@@ -2,7 +2,8 @@ use crate::config::{StorageProvider, storage_config::StorageConfig};
 use crate::error::{Error, Result};
 use argon2::{Algorithm, Argon2, Params as Argon2Params, Version};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use chacha20poly1305::aead::{Aead, KeyInit};
+use chacha20poly1305::aead::generic_array::typenum::Unsigned;
+use chacha20poly1305::aead::{Aead, AeadCore, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
 use directories::ProjectDirs;
 use rand::{RngCore, rng};
@@ -472,6 +473,12 @@ impl MasterPasswordEncryption {
                 })?;
         let key = self.derive_key(&params, &salt)?;
         let cipher = ChaCha20Poly1305::new(&key);
+        let expected_nonce_len = <ChaCha20Poly1305 as AeadCore>::NonceSize::to_usize();
+        if nonce_bytes.len() != expected_nonce_len {
+            return Err(Error::ProfileDecryption {
+                message: "invalid nonce length".to_string(),
+            });
+        }
         let nonce = Nonce::from_slice(&nonce_bytes);
         let plaintext =
             cipher
