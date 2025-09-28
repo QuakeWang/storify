@@ -69,6 +69,18 @@ COS_SECRET_KEY *(preferred; maps to STORAGE_ACCESS_KEY_SECRET)*
 STORAGE_ROOT_PATH=./storage
 ```
 
+### Environment key priority
+
+Storify resolves environment variables in a deterministic order so existing setups continue to work:
+
+- **OSS**: `STORAGE_*` overrides `OSS_*`.
+- **S3**: `STORAGE_*` overrides `AWS_*`, which in turn overrides `MINIO_*` (handy when migrating MinIO configs without renaming keys).
+- **MinIO alias** (`STORAGE_PROVIDER=minio`): `STORAGE_*` overrides `MINIO_*`.
+- **COS**: `STORAGE_*` overrides `COS_*`.
+- **HDFS**: `HDFS_NAME_NODE` is required; `HDFS_ROOT_PATH` remains optional.
+
+When required fields are missing, Storify returns actionable errors that end with ``hint: run `storify config` or supply --profile``.
+
 ## Usage
 
 ```bash
