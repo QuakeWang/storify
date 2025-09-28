@@ -1,5 +1,7 @@
 use snafu::Snafu;
 use std::path::PathBuf;
+use std::string::FromUtf8Error;
+use toml::{de::Error as TomlDeError, ser::Error as TomlSerError};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -99,6 +101,44 @@ pub enum Error {
 
     #[snafu(display("JSON serialization error: {source}"))]
     Json { source: serde_json::Error },
+
+    #[snafu(display("Profile store location unavailable"))]
+    ProfileStoreUnavailable,
+
+    #[snafu(display("Failed to access profile store '{}': {source}", path.display()))]
+    ProfileStoreIo {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+
+    #[snafu(display("Failed to parse profile store '{}': {source}", path.display()))]
+    ProfileStoreParse { path: PathBuf, source: TomlDeError },
+
+    #[snafu(display("Failed to serialize profile store '{}': {source}", path.display()))]
+    ProfileStoreSerialize { path: PathBuf, source: TomlSerError },
+
+    #[snafu(display("Invalid UTF-8 in profile store '{}': {source}", path.display()))]
+    ProfileStoreUtf8 {
+        path: PathBuf,
+        source: FromUtf8Error,
+    },
+
+    #[snafu(display("Profile store version mismatch: expected {expected}, found {found}"))]
+    ProfileStoreVersion { expected: u8, found: u8 },
+
+    #[snafu(display("Profile encryption error: {message}"))]
+    ProfileEncryption { message: String },
+
+    #[snafu(display("Profile decryption error: {message}"))]
+    ProfileDecryption { message: String },
+
+    #[snafu(display("Profile '{name}' not found"))]
+    ProfileNotFound { name: String },
+
+    #[snafu(display(
+        "No configuration resolves. Available profiles: {profiles}. Hint: run `storify config` or supply --profile"
+    ))]
+    NoConfiguration { profiles: String },
 }
 
 impl From<opendal::Error> for Error {

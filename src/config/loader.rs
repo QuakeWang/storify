@@ -1,4 +1,6 @@
-use crate::config::{StorageProvider, prepare_storage_config, storage_config::StorageConfig};
+use crate::config::{
+    ProfileStore, StorageProvider, prepare_storage_config, storage_config::StorageConfig,
+};
 use crate::error::{Error, Result};
 use log::warn;
 use std::env;
@@ -166,9 +168,23 @@ impl EnvConfig {
 /// Alias used to align terminology with design documents.
 type RawConfigValues = EnvConfig;
 
-/// Load storage configuration from environment variables
+/// Load storage configuration using environment variables and profile store fallback.
 pub fn load_storage_config() -> Result<StorageConfig> {
-    load_storage_config_from_source(&env_value, None)
+    load_storage_config_with_profile(None, None)
+}
+
+/// Load storage configuration with explicit profile selection.
+pub fn load_storage_config_with_profile(
+    profile_hint: Option<&str>,
+    master_password: Option<String>,
+) -> Result<StorageConfig> {
+    match ProfileStore::open_default(master_password) {
+        Ok(store) => load_with_store(&env_value, None, profile_hint, &store),
+        Err(Error::ProfileStoreUnavailable) if profile_hint.is_none() => {
+            load_storage_config_from_source(&env_value, None)
+        }
+        Err(err) => Err(err),
+    }
 }
 
 fn load_storage_config_from_source(
@@ -178,6 +194,45 @@ fn load_storage_config_from_source(
     load_env_config(get, provider_hint)
         .and_then(build_config)
         .map_err(with_config_hint)
+}
+
+fn load_with_store(
+    get: &dyn Fn(&str) -> Option<String>,
+    provider_hint: Option<String>,
+    profile_hint: Option<&str>,
+    store: &ProfileStore,
+) -> Result<StorageConfig> {
+    if let Some(name) = profile_hint {
+        return load_profile_from_store(store, name);
+    }
+
+    match load_storage_config_from_source(get, provider_hint.clone()) {
+        Ok(cfg) => Ok(cfg),
+        Err(err) => match err {
+            Error::MissingEnvVar { .. } | Error::MissingConfigField { .. } => {
+                if let Some(default_name) = store.default_profile()? {
+                    return load_profile_from_store(store, &default_name);
+                }
+                let profiles = store.list_profiles().unwrap_or_default();
+                let display = if profiles.is_empty() {
+                    "none".to_string()
+                } else {
+                    profiles.join(", ")
+                };
+                Err(Error::NoConfiguration { profiles: display })
+            }
+            other => Err(other),
+        },
+    }
+}
+
+fn load_profile_from_store(store: &ProfileStore, name: &str) -> Result<StorageConfig> {
+    match store.load(name)? {
+        Some(profile) => profile.into_config(),
+        None => Err(Error::ProfileNotFound {
+            name: name.to_string(),
+        }),
+    }
 }
 
 fn load_env_config(
@@ -295,7 +350,10 @@ fn with_config_hint(err: Error) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::StoredProfile;
     use std::collections::HashMap;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
     struct TestEnv<'a> {
         map: HashMap<&'a str, Option<&'a str>>,
     }
@@ -410,5 +468,93 @@ mod tests {
         let err = load_env_config(&getter, Some("hdfs".to_string()))
             .expect_err("hdfs should require name node");
         assert!(matches!(err, Error::MissingEnvVar { key } if key.contains("HDFS_NAME_NODE")));
+    }
+
+    #[test]
+    fn profile_hint_overrides_environment() {
+        let env = TestEnv::new(&[
+            ("STORAGE_PROVIDER", Some("s3")),
+            ("STORAGE_BUCKET", Some("env-bucket")),
+        ]);
+        let getter = env.getter();
+        let store = temp_profile_store("hint", None);
+        store
+            .save(
+                "prod",
+                stored_profile(StorageProvider::Oss, "profile-bucket"),
+                true,
+            )
+            .expect("save profile");
+
+        let cfg = load_with_store(&getter, None, Some("prod"), &store).expect("profile hint");
+        assert_eq!(cfg.provider, StorageProvider::Oss);
+        assert_eq!(cfg.bucket, "profile-bucket");
+        cleanup_store(&store);
+    }
+
+    #[test]
+    fn default_profile_used_when_env_missing() {
+        let env = TestEnv::new(&[]);
+        let getter = env.getter();
+        let store = temp_profile_store("default", None);
+        store
+            .save(
+                "dev",
+                stored_profile(StorageProvider::Cos, "profile-bucket"),
+                true,
+            )
+            .expect("save profile");
+
+        let cfg = load_with_store(&getter, None, None, &store).expect("fallback profile");
+        assert_eq!(cfg.provider, StorageProvider::Cos);
+        assert_eq!(cfg.bucket, "profile-bucket");
+        cleanup_store(&store);
+    }
+
+    #[test]
+    fn no_configuration_lists_profiles() {
+        let env = TestEnv::new(&[]);
+        let getter = env.getter();
+        let store = temp_profile_store("none", None);
+
+        let err = load_with_store(&getter, None, None, &store).expect_err("no configuration");
+        match err {
+            Error::NoConfiguration { profiles } => assert_eq!(profiles, "none"),
+            other => panic!("unexpected error: {other:?}"),
+        }
+        cleanup_store(&store);
+    }
+
+    fn temp_profile_store(name: &str, password: Option<&str>) -> ProfileStore {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "storify-loader-profile-{}-{}.toml",
+            name,
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        ProfileStore::with_path(path, password.map(|s| s.to_string()))
+    }
+
+    fn stored_profile(provider: StorageProvider, bucket: &str) -> StoredProfile {
+        StoredProfile {
+            provider: provider.as_str().to_string(),
+            bucket: bucket.to_string(),
+            access_key_id: Some("id".into()),
+            access_key_secret: Some("secret".into()),
+            endpoint: None,
+            region: None,
+            root_path: None,
+            name_node: None,
+            anonymous: false,
+        }
+    }
+
+    fn cleanup_store(store: &ProfileStore) {
+        let path = store.path().to_path_buf();
+        fs::remove_file(&path).ok();
+        fs::remove_file(path.with_extension("bak")).ok();
     }
 }
