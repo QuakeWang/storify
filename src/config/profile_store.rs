@@ -395,10 +395,6 @@ impl ProfileStore {
                 source,
             })?;
 
-        // Load salt with backward compatibility:
-        // 1. Try to load from dedicated salt file (new format)
-        // 2. Fall back to extracting from encrypted fields (old format)
-        // 3. If old format is detected, migrate to new format by saving salt file
         let salt = Self::load_salt_with_migration(path, &file.profiles)?;
 
         let key = derive_master_key(&password, &salt)?;
@@ -420,19 +416,16 @@ impl ProfileStore {
     ) -> Result<Vec<u8>> {
         let salt_path = Self::salt_file_path(path);
 
-        // Priority 1: Load from dedicated salt file (new format)
         if salt_path.exists() {
             return Self::read_salt_file(&salt_path);
         }
 
-        // Priority 2: Extract from encrypted fields (old format - backward compatibility)
         if let Ok(salt) = extract_salt_from_profiles(profiles) {
             // Automatic migration: save to salt file for future use
             Self::write_salt_file(&salt_path, &salt)?;
             return Ok(salt);
         }
 
-        // Priority 3: Generate new salt (new profile store or no encrypted fields yet)
         let salt = generate_salt();
         Self::write_salt_file(&salt_path, &salt)?;
         Ok(salt.to_vec())
@@ -500,8 +493,10 @@ fn encrypt_all_profiles(
 
 /// Decrypt sensitive field (automatically handles all formats)
 fn decrypt_sensitive_field(field: &mut Option<String>, key: &[u8; 32]) -> Result<()> {
-    if let Some(encrypted) = field {
-        *field = decrypt_field_auto(encrypted, key)?;
+    if let Some(encrypted) = field.as_mut()
+        && let Some(decrypted) = decrypt_field_auto(encrypted, key)?
+    {
+        *encrypted = decrypted;
     }
     Ok(())
 }
