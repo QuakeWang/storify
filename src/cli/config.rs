@@ -203,14 +203,19 @@ fn create_profile(args: &CreateArgs, ctx: &CliContext) -> Result<()> {
                 bucket = Some(session.input_required(ctx, "Bucket", false)?);
             }
 
-            if access_key_id.is_none() && provider != StorageProvider::Cos {
-                println!("Access key ID (leave blank for anonymous).");
-                access_key_id = session.input_optional(ctx, "Access key ID", false)?;
+            if access_key_id.is_none() {
+                if provider == StorageProvider::Cos {
+                    println!("Secret ID (required for COS).");
+                    access_key_id = Some(session.input_required(ctx, "Secret ID", false)?);
+                } else {
+                    println!("Access key ID (leave blank for anonymous).");
+                    access_key_id = session.input_optional(ctx, "Access key ID", false)?;
+                }
             }
 
             if access_key_secret.is_none() {
                 if provider == StorageProvider::Cos {
-                    println!("Secret key (required).");
+                    println!("Secret key (required for COS).");
                     access_key_secret = Some(session.input_required(ctx, "Secret key", false)?);
                 } else {
                     println!("Secret key (leave blank for anonymous).");

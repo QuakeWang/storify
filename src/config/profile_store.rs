@@ -354,6 +354,12 @@ impl ProfileStore {
         }
 
         write_atomic(&self.path, serialized.as_bytes())?;
+
+        // Synchronize salt file to ensure it matches the in-memory state
+        // This is critical for operations like set_encryption() that generate a new salt
+        let salt_path = Self::salt_file_path(&self.path);
+        Self::write_salt_file(&salt_path, salt)?;
+
         Ok(())
     }
 
