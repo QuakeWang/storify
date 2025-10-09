@@ -138,6 +138,7 @@ storify tail -v path/to/file       # always show header
 storify grep "pattern" path/to/file       # basic search
 storify grep -i "pattern" path/to/file    # case-insensitive
 storify grep -n "pattern" path/to/file    # show line numbers
+storify grep -R "pattern" path/           # recursive
 
 # Show disk usage
 storify du path/to/dir
@@ -169,7 +170,7 @@ storify stat path/to/file --raw    # raw key=value format
 | `cat` | Display file contents | |
 | `head` | Display beginning of file | `-n` (lines), `-c` (bytes), `-q` (quiet), `-v` (verbose) |
 | `tail` | Display end of file | `-n` (lines), `-c` (bytes), `-q` (quiet), `-v` (verbose) |
-| `grep` | Search for patterns in files | `-i` (case-insensitive), `-n` (line numbers) |
+| `grep` | Search for patterns in files | `-i` (case-insensitive), `-n` (line numbers) ,`-R` (recursive) |
 | `rm` | Delete files/directories | `-R` (recursive), `-f` (force) |
 | `du` | Show disk usage | `-s` (summary) |
 | `stat` | Show object metadata | `--json`, `--raw` |

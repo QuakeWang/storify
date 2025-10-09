@@ -1,5 +1,7 @@
 use crate::error::{Error, Result};
+use memchr::memchr_iter;
 use opendal::Operator;
+use std::io::BufWriter;
 use std::io::{self, Write};
 
 struct GrepOptions<'a, W: Write> {
@@ -7,7 +9,9 @@ struct GrepOptions<'a, W: Write> {
     needle: &'a str,
     ignore_case: bool,
     line_number: bool,
+    with_filename: bool,
     handle: &'a mut W,
+    out_buf: String,
 }
 
 /// Trait for searching patterns in files.
@@ -22,6 +26,7 @@ pub trait Greper {
         pattern: &str,
         ignore_case: bool,
         line_number: bool,
+        with_filename: bool,
     ) -> Result<()>;
 }
 
@@ -41,6 +46,7 @@ impl OpenDalGreper {
         pattern: &str,
         ignore_case: bool,
         line_number: bool,
+        with_filename: bool,
     ) -> Result<()> {
         // Ensure target exists; map NotFound to PathNotFound
         let meta = self.operator.stat(path).await.map_err(|e| {
@@ -64,7 +70,7 @@ impl OpenDalGreper {
         // Stream-read the object by ranged reads
         const CHUNK_SIZE: u64 = 64 * 1024;
         let stdout = io::stdout();
-        let mut handle = stdout.lock();
+        let mut handle = BufWriter::new(stdout.lock());
 
         let mut next_offset: u64 = 0;
         let mut line_no: usize = 0;
@@ -78,7 +84,9 @@ impl OpenDalGreper {
             needle: &needle,
             ignore_case,
             line_number,
+            with_filename,
             handle: &mut handle,
+            out_buf: String::with_capacity(256),
         };
 
         // Tracks EOF for unknown-size reads when we observe a short read
@@ -147,27 +155,24 @@ impl OpenDalGreper {
             // Reset leftover for reuse
             let combined = buf;
 
-            // Split by '\n'; keep last partial line in leftover
+            // Split by '\n'; keep last partial line in leftover (memchr for speed)
             let mut start: usize = 0;
-            for i in 0..combined.len() {
-                if combined[i] == b'\n' {
-                    // Full line is [start, i) excluding the newline
-                    let mut line_bytes = &combined[start..i];
-                    // Trim trailing CR for Windows-style lines
-                    if let Some(&b'\r') = line_bytes.last() {
-                        line_bytes = &line_bytes[..line_bytes.len() - 1];
-                    }
-
-                    line_no += 1;
-                    self.process_line(&mut opts, line_no, line_bytes)?;
-
-                    start = i + 1;
+            for i in memchr_iter(b'\n', &combined) {
+                let mut line_bytes = &combined[start..i];
+                if let Some(&b'\r') = line_bytes.last() {
+                    line_bytes = &line_bytes[..line_bytes.len() - 1];
                 }
+
+                line_no += 1;
+                self.process_line(&mut opts, line_no, line_bytes)?;
+
+                start = i + 1;
             }
 
-            // Save remaining partial line to leftover
+            // Save remaining partial line to leftover (reuse allocation)
             leftover = if start < combined.len() {
-                combined[start..].to_vec()
+                let mut combined = combined; // take ownership
+                combined.split_off(start)
             } else {
                 Vec::new()
             };
@@ -200,6 +205,7 @@ impl OpenDalGreper {
         // Optimize ASCII fast-path for case-insensitive checks without allocations
         let matched = if opts.ignore_case {
             if line.is_ascii() && opts.needle.is_ascii() {
+                // opts.needle 已在外层按 ignore_case 预小写，这里仅对 haystack 做无分配按位比较
                 Self::ascii_contains_case_insensitive(line.as_bytes(), opts.needle.as_bytes())
             } else {
                 line.to_lowercase().contains(opts.needle)
@@ -209,19 +215,16 @@ impl OpenDalGreper {
         };
 
         if matched {
-            if opts.line_number {
-                self.write_all_handle(
-                    opts.path,
-                    &mut opts.handle,
-                    format!("{}:{}\n", line_no, line).as_bytes(),
-                )?;
-            } else {
-                self.write_all_handle(
-                    opts.path,
-                    &mut opts.handle,
-                    format!("{}\n", line).as_bytes(),
-                )?;
+            use std::fmt::Write as _;
+            opts.out_buf.clear();
+            if opts.with_filename {
+                let _ = write!(&mut opts.out_buf, "{}:", opts.path);
             }
+            if opts.line_number {
+                let _ = write!(&mut opts.out_buf, "{}:", line_no);
+            }
+            let _ = writeln!(&mut opts.out_buf, "{}", line);
+            self.write_all_handle(opts.path, &mut opts.handle, opts.out_buf.as_bytes())?;
         }
         Ok(())
     }
@@ -234,23 +237,11 @@ impl OpenDalGreper {
         if needle.len() > haystack.len() {
             return false;
         }
-        // Pre-lowercase a local copy of needle bytes (small, one-time per line)
-        let mut nbuf = [0u8; 128];
-        let nb: std::borrow::Cow<[u8]> = if needle.len() <= nbuf.len() {
-            // stack buffer for common short needles
-            for (i, b) in needle.iter().enumerate() {
-                nbuf[i] = b.to_ascii_lowercase();
-            }
-            std::borrow::Cow::Borrowed(&nbuf[..needle.len()])
-        } else {
-            std::borrow::Cow::Owned(needle.iter().map(|b| b.to_ascii_lowercase()).collect())
-        };
-
-        let nlen = nb.len();
+        let nlen = needle.len();
         for i in 0..=haystack.len() - nlen {
             let mut j = 0;
             while j < nlen {
-                if haystack[i + j].to_ascii_lowercase() != nb[j] {
+                if haystack[i + j].to_ascii_lowercase() != needle[j] {
                     break;
                 }
                 j += 1;
@@ -296,8 +287,9 @@ impl Greper for OpenDalGreper {
         pattern: &str,
         ignore_case: bool,
         line_number: bool,
+        with_filename: bool,
     ) -> Result<()> {
-        self.search_and_print(path, pattern, ignore_case, line_number)
+        self.search_and_print(path, pattern, ignore_case, line_number, with_filename)
             .await
     }
 }

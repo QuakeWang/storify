@@ -209,6 +209,10 @@ pub struct GrepArgs {
     /// Show line numbers
     #[arg(short = 'n', long = "line-number")]
     pub line_number: bool,
+
+    /// Recursively search directories
+    #[arg(short = 'R', long = "recursive")]
+    pub recursive: bool,
 }
 
 pub async fn execute(command: &Command, ctx: &CliContext) -> Result<()> {
@@ -323,11 +327,12 @@ pub async fn execute(command: &Command, ctx: &CliContext) -> Result<()> {
         }
         Command::Grep(grep_args) => {
             client
-                .grep_file(
+                .grep_path(
                     &grep_args.path,
                     &grep_args.pattern,
                     grep_args.ignore_case,
                     grep_args.line_number,
+                    grep_args.recursive,
                 )
                 .await?;
         }

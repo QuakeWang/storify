@@ -37,6 +37,7 @@ secrecy = "0.10"
 zeroize = { version = "1.8", features = ["derive"] }
 blake3 = "1.5"
 uuid = { version = "1.18.1", features = ["v4"] }
+memchr = "2"
 
 [dev-dependencies]
 assert_cmd = "2.0.17"

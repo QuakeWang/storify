@@ -27,7 +27,9 @@ use self::operations::{
     Cater, Copier, Deleter, Downloader, Greper, Header, Lister, Mkdirer, Mover, Stater, Tailer,
     Uploader, UsageCalculator,
 };
+use crate::storage::utils::error::IntoStorifyError;
 use crate::wrap_err;
+use futures::stream::TryStreamExt;
 
 /// Unified storage client using OpenDAL
 #[derive(Clone)]
@@ -480,10 +482,91 @@ impl StorageClient {
         );
         let greper = OpenDalGreper::new(self.operator.clone());
         wrap_err!(
-            greper.grep(path, pattern, ignore_case, line_number).await,
+            greper
+                .grep(path, pattern, ignore_case, line_number, false)
+                .await,
             GrepFailed {
                 path: path.to_string()
             }
         )
+    }
+
+    pub async fn grep_path(
+        &self,
+        path: &str,
+        pattern: &str,
+        ignore_case: bool,
+        line_number: bool,
+        recursive: bool,
+    ) -> Result<()> {
+        log::debug!(
+            "grep_path provider={:?} path={} pattern={} ignore_case={} line_number={} recursive={}",
+            self.provider,
+            path,
+            pattern,
+            ignore_case,
+            line_number,
+            recursive
+        );
+
+        let meta = self.operator.stat(path).await.map_err(|e| {
+            if e.kind() == opendal::ErrorKind::NotFound {
+                Error::PathNotFound {
+                    path: std::path::PathBuf::from(path),
+                }
+            } else {
+                Error::GrepFailed {
+                    path: path.to_string(),
+                    source: Box::new(e.into()),
+                }
+            }
+        })?;
+
+        if meta.mode().is_file() {
+            return self
+                .grep_file(path, pattern, ignore_case, line_number)
+                .await;
+        }
+
+        if meta.mode().is_dir() {
+            if !recursive {
+                return Err(Error::InvalidArgument {
+                    message: "Path is a directory; use -R to grep recursively".to_string(),
+                });
+            }
+
+            // Minimal recursive traversal: list recursively and grep each file
+            let lister = wrap_err!(
+                self.operator.lister_with(path).recursive(true).await,
+                ListDirectoryFailed {
+                    path: path.to_string()
+                }
+            )?;
+
+            // For now, run sequentially to keep implementation simple (KISS). Later we can add concurrency control.
+            futures::pin_mut!(lister);
+            while let Some(entry) =
+                lister
+                    .try_next()
+                    .await
+                    .map_err(|e| Error::ListDirectoryFailed {
+                        path: path.to_string(),
+                        source: Box::new(e.into_error()),
+                    })?
+            {
+                if entry.metadata().mode().is_file() {
+                    // For recursive searches, include filename in output
+                    let greper = OpenDalGreper::new(self.operator.clone());
+                    greper
+                        .grep(entry.path(), pattern, ignore_case, line_number, true)
+                        .await?;
+                }
+            }
+            return Ok(());
+        }
+
+        Err(Error::InvalidArgument {
+            message: format!("Unsupported object type for grep: {}", path),
+        })
     }
 }
