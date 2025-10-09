@@ -1,30 +1,24 @@
-use crate::config::{StorageProvider, storage_config::StorageConfig};
+use crate::config::{
+    StorageProvider,
+    crypto::{
+        EncryptionMetadata, decrypt_field_auto, derive_master_key, encrypt_field,
+        encrypt_field_with_salt, extract_salt, generate_salt, resolve_master_password,
+    },
+    storage_config::StorageConfig,
+};
 use crate::error::{Error, Result};
-use argon2::{Algorithm, Argon2, Params as Argon2Params, Version};
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use chacha20poly1305::aead::generic_array::typenum::Unsigned;
-use chacha20poly1305::aead::{Aead, AeadCore, KeyInit};
-use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
-use directories::ProjectDirs;
-use rand::{RngCore, rng};
-use secrecy::{ExposeSecret, SecretString};
+use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-#[cfg(not(unix))]
-use std::sync::Once;
+use uuid::Uuid;
 
-const VERSION: u8 = 1;
-const FILE_NAME: &str = "profiles.toml";
-const BACKUP_SUFFIX: &str = "bak";
-const KEY_LENGTH: usize = 32;
-const ARGON2_ALGORITHM: &str = "ARGON2ID";
-const DEFAULT_ARGON2_MEMORY_KIB: u32 = 64 * 1024;
-const DEFAULT_ARGON2_ITERATIONS: u32 = 3;
-const DEFAULT_ARGON2_LANES: u32 = 1;
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StoredProfile {
@@ -42,7 +36,8 @@ pub struct StoredProfile {
     pub root_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name_node: Option<String>,
-    #[serde(default)]
+    // Not serialized to file; derived at runtime based on presence of credentials
+    #[serde(skip)]
     pub anonymous: bool,
 }
 
@@ -77,605 +72,460 @@ impl StoredProfile {
         crate::config::prepare_storage_config(&mut config)?;
         Ok(config)
     }
+}
 
-    pub fn redacted(&self) -> Self {
-        let mut clone = self.clone();
-        if clone.access_key_id.is_some() {
-            clone.access_key_id = Some("****".to_string());
+/// Profile store file structure (in-memory and persisted)
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct ProfileStoreFile {
+    #[serde(default)]
+    default: Option<String>,
+    #[serde(default)]
+    profiles: BTreeMap<String, StoredProfile>,
+}
+
+impl ProfileStoreFile {
+    fn normalize_default(&mut self) {
+        let should_clear = self
+            .default
+            .as_ref()
+            .map(|d| !self.profiles.contains_key(d))
+            .unwrap_or(false);
+
+        if should_clear {
+            self.default = None;
         }
-        if clone.access_key_secret.is_some() {
-            clone.access_key_secret = Some("****".to_string());
-        }
-        clone
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct ProfileStoreOpenOptions {
+    pub path: Option<PathBuf>,
+    pub master_password: Option<SecretString>,
+}
+
+/// Persistent profile storage with best-effort secure defaults (XDG paths, 0600 files).
 #[derive(Debug, Clone)]
 pub struct ProfileStore {
     path: PathBuf,
-    encryption: Encryption,
-}
-
-#[derive(Debug, Clone)]
-enum Encryption {
-    Plaintext,
-    MasterPassword(MasterPasswordEncryption),
-}
-
-#[derive(Debug, Clone)]
-struct MasterPasswordEncryption {
-    password: SecretString,
-}
-
-#[derive(Debug, Clone)]
-struct KdfParams {
-    memory_kib: u32,
-    iterations: u32,
-    lanes: u32,
-}
-
-impl KdfParams {
-    fn default_argon2() -> Self {
-        Self {
-            memory_kib: DEFAULT_ARGON2_MEMORY_KIB,
-            iterations: DEFAULT_ARGON2_ITERATIONS,
-            lanes: DEFAULT_ARGON2_LANES,
-        }
-    }
-
-    fn to_info(&self) -> KdfInfo {
-        KdfInfo {
-            algorithm: ARGON2_ALGORITHM.to_string(),
-            memory_kib: self.memory_kib,
-            iterations: self.iterations,
-            lanes: self.lanes,
-        }
-    }
-
-    fn parse(info: KdfInfo) -> Result<Self> {
-        if info.algorithm.eq_ignore_ascii_case(ARGON2_ALGORITHM) {
-            Ok(Self {
-                memory_kib: info.memory_kib,
-                iterations: info.iterations,
-                lanes: info.lanes,
-            })
-        } else {
-            Err(Error::ProfileDecryption {
-                message: format!("unsupported kdf: {}", info.algorithm),
-            })
-        }
-    }
-}
-
-#[derive(Default)]
-struct ProfilesState {
-    default_profile: Option<String>,
-    profiles: BTreeMap<String, StoredProfile>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct PlainProfilesFile {
-    version: u8,
-    default_profile: Option<String>,
-    profiles: BTreeMap<String, StoredProfile>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct EncryptedProfilesFile {
-    version: u8,
-    encryption: EncryptedPayload,
-}
-
-#[derive(Serialize, Deserialize)]
-struct EncryptedPayload {
-    algorithm: String,
-    kdf: KdfInfo,
-    salt: String,
-    nonce: String,
-    data: String,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-struct KdfInfo {
-    algorithm: String,
-    memory_kib: u32,
-    iterations: u32,
-    lanes: u32,
+    file: ProfileStoreFile,
+    encryption: EncryptionMetadata,
 }
 
 impl ProfileStore {
-    pub fn open_default(password: Option<String>) -> Result<Self> {
-        let path = default_profiles_path()?;
-        Ok(Self::with_path(path, password))
+    pub fn default_path() -> PathBuf {
+        default_store_path()
     }
 
-    pub fn with_path(path: PathBuf, password: Option<String>) -> Self {
-        Self {
+    pub fn open_default() -> Result<Self> {
+        Self::open_with_options(ProfileStoreOpenOptions::default())
+    }
+
+    pub fn open(path: Option<PathBuf>) -> Result<Self> {
+        Self::open_with_options(ProfileStoreOpenOptions {
             path,
-            encryption: Encryption::from_password(password),
+            ..ProfileStoreOpenOptions::default()
+        })
+    }
+
+    pub fn open_with_password(
+        path: Option<PathBuf>,
+        master_password: Option<SecretString>,
+    ) -> Result<Self> {
+        Self::open_with_options(ProfileStoreOpenOptions {
+            path,
+            master_password,
+        })
+    }
+
+    pub fn open_with_options(options: ProfileStoreOpenOptions) -> Result<Self> {
+        let path = options.path.unwrap_or_else(default_store_path);
+        if path.is_dir() {
+            return Err(Error::ProfileStoreIo {
+                path,
+                source: std::io::Error::other("profile store path points to a directory"),
+            });
         }
+
+        let (file, encryption) = if path.exists() {
+            Self::read_file(&path, options.master_password.as_ref())?
+        } else {
+            let password = resolve_master_password(options.master_password.clone(), &path);
+            let salt = generate_salt();
+            let key = derive_master_key(&password, &salt)?;
+            let encryption = EncryptionMetadata::new(key, salt.to_vec());
+            (ProfileStoreFile::default(), encryption)
+        };
+
+        Ok(Self {
+            path,
+            file,
+            encryption,
+        })
     }
 
     pub fn path(&self) -> &Path {
         &self.path
     }
 
-    pub fn load(&self, name: &str) -> Result<Option<StoredProfile>> {
-        let state = self.read_state()?;
-        Ok(state.profiles.get(name).cloned())
+    pub fn profile(&self, name: &str) -> Option<&StoredProfile> {
+        self.file.profiles.get(name)
     }
 
-    pub fn save(&self, name: &str, profile: StoredProfile, set_default: bool) -> Result<()> {
-        let mut state = self.read_state()?;
-        state.profiles.insert(name.to_string(), profile);
-        if set_default {
-            state.default_profile = Some(name.to_string());
+    /// Get a cloned profile by name (returns error if not found)
+    pub fn get_profile(&self, name: &str) -> Result<StoredProfile> {
+        self.profile(name)
+            .cloned()
+            .ok_or_else(|| Error::ProfileNotFound {
+                name: name.to_string(),
+            })
+    }
+
+    pub fn available_profiles(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.file.profiles.keys().cloned().collect();
+        names.sort();
+        names
+    }
+
+    pub fn default_profile(&self) -> Option<&str> {
+        self.file.default.as_deref()
+    }
+
+    pub fn save_profile(
+        &mut self,
+        name: String,
+        profile: StoredProfile,
+        make_default: bool,
+    ) -> Result<()> {
+        if make_default {
+            self.file.default = Some(name.clone());
         }
-        self.write_state(&state)
+        self.file.profiles.insert(name, profile);
+        self.persist()
     }
 
-    pub fn remove(&self, name: &str) -> Result<()> {
-        let mut state = self.read_state()?;
-        state.profiles.remove(name);
-        if state
-            .default_profile
-            .as_ref()
-            .map(|default| default == name)
-            .unwrap_or(false)
-        {
-            state.default_profile = None;
-        }
-        self.write_state(&state)
-    }
-
-    pub fn list_profiles(&self) -> Result<Vec<String>> {
-        let state = self.read_state()?;
-        Ok(state.profiles.keys().cloned().collect())
-    }
-
-    pub fn list_profiles_redacted(&self) -> Result<Vec<(String, StoredProfile)>> {
-        let state = self.read_state()?;
-        Ok(state
-            .profiles
-            .iter()
-            .map(|(name, p)| (name.clone(), p.redacted()))
-            .collect())
-    }
-
-    pub fn default_profile(&self) -> Result<Option<String>> {
-        let state = self.read_state()?;
-        Ok(state.default_profile)
-    }
-
-    pub fn set_default_profile(&self, profile: Option<&str>) -> Result<()> {
-        let mut state = self.read_state()?;
-        state.default_profile = profile.map(|p| p.to_string());
-        self.write_state(&state)
-    }
-
-    fn read_state(&self) -> Result<ProfilesState> {
-        if !self.path.exists() {
-            return Ok(ProfilesState::default());
-        }
-        let bytes = fs::read(&self.path).map_err(|source| Error::ProfileStoreIo {
-            path: self.path.clone(),
-            source,
-        })?;
-        let content = String::from_utf8(bytes).map_err(|err| Error::ProfileStoreUtf8 {
-            path: self.path.clone(),
-            source: err,
-        })?;
-
-        if content.trim().is_empty() {
-            return Ok(ProfilesState::default());
-        }
-
-        if let Some(state) = self.try_read_encrypted(&content)? {
-            return Ok(state);
-        }
-
-        let file = self.decode_plain_profiles(&content)?;
-        Ok(ProfilesState {
-            default_profile: file.default_profile,
-            profiles: file.profiles,
-        })
-    }
-
-    fn write_state(&self, state: &ProfilesState) -> Result<()> {
-        let plaintext = PlainProfilesFile {
-            version: VERSION,
-            default_profile: state.default_profile.clone(),
-            profiles: state.profiles.clone(),
-        };
-
-        ensure_dir(self.path.parent())?;
-        let serialized = match &self.encryption {
-            Encryption::Plaintext => toml::to_string_pretty(&plaintext).map_err(|source| {
-                Error::ProfileStoreSerialize {
-                    path: self.path.clone(),
-                    source,
-                }
-            })?,
-            Encryption::MasterPassword(strategy) => {
-                let plain =
-                    toml::to_string(&plaintext).map_err(|source| Error::ProfileStoreSerialize {
-                        path: self.path.clone(),
-                        source,
-                    })?;
-                let encrypted = strategy.encrypt(plain.as_bytes())?;
-                let file = EncryptedProfilesFile {
-                    version: VERSION,
-                    encryption: encrypted,
-                };
-                toml::to_string_pretty(&file).map_err(|source| Error::ProfileStoreSerialize {
-                    path: self.path.clone(),
-                    source,
-                })?
+    /// Delete a profile (returns error if not found)
+    pub fn delete_profile(&mut self, name: &str) -> Result<()> {
+        self.file.profiles.remove(name).ok_or_else(|| {
+            Error::ProfileNotFound {
+                name: name.to_string(),
             }
-        };
-
-        if self.path.exists() {
-            let backup = self.path.with_extension(BACKUP_SUFFIX);
-            fs::copy(&self.path, &backup).map_err(|source| Error::ProfileStoreIo {
-                path: backup.clone(),
-                source,
-            })?;
-            set_secure_permissions(&backup)?;
-        }
-
-        let tmp_path = self.path.with_extension("tmp");
-        let write_result = (|| -> Result<()> {
-            let mut tmp_file = OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(&tmp_path)
-                .map_err(|source| Error::ProfileStoreIo {
-                    path: tmp_path.clone(),
-                    source,
-                })?;
-            tmp_file
-                .write_all(serialized.as_bytes())
-                .map_err(|source| Error::ProfileStoreIo {
-                    path: tmp_path.clone(),
-                    source,
-                })?;
-            tmp_file
-                .sync_all()
-                .map_err(|source| Error::ProfileStoreIo {
-                    path: tmp_path.clone(),
-                    source,
-                })?;
-            Ok(())
-        })();
-
-        if let Err(err) = write_result {
-            fs::remove_file(&tmp_path).ok();
-            return Err(err);
-        }
-
-        set_secure_permissions(&tmp_path)?;
-        fs::rename(&tmp_path, &self.path).map_err(|source| Error::ProfileStoreIo {
-            path: self.path.clone(),
-            source,
         })?;
-        set_secure_permissions(&self.path)?;
-        Ok(())
-    }
 
-    fn try_read_encrypted(&self, content: &str) -> Result<Option<ProfilesState>> {
-        if let Ok(encrypted) = toml::from_str::<EncryptedProfilesFile>(content) {
-            return self.decrypt_state(encrypted).map(Some);
+        // Clear default if deleting the default profile
+        if self.file.default.as_deref() == Some(name) {
+            self.file.default = None;
         }
-        Ok(None)
+
+        self.persist()
     }
 
-    fn decrypt_state(&self, encrypted: EncryptedProfilesFile) -> Result<ProfilesState> {
-        if encrypted.encryption.algorithm != MasterPasswordEncryption::ALGORITHM {
-            return Err(Error::ProfileDecryption {
-                message: "Unsupported encryption algorithm".to_string(),
+    pub fn set_default_profile(&mut self, name: Option<String>) -> Result<()> {
+        if let Some(ref candidate) = name
+            && !self.file.profiles.contains_key(candidate)
+        {
+            return Err(Error::ProfileNotFound {
+                name: candidate.clone(),
             });
         }
-        let plain = self.encryption.decrypt(&encrypted, &self.path)?;
-        let file = self.decode_plain_profiles(&plain)?;
-        Ok(ProfilesState {
-            default_profile: file.default_profile,
-            profiles: file.profiles,
-        })
+        self.file.default = name;
+        self.persist()
     }
 
-    fn decode_plain_profiles(&self, plain: &str) -> Result<PlainProfilesFile> {
-        toml::from_str::<PlainProfilesFile>(plain)
-            .map_err(|source| Error::ProfileStoreParse {
+    /// Re-derive encryption key (for key rotation or master password change)
+    pub fn set_encryption(&mut self, master_password: Option<SecretString>) -> Result<()> {
+        let password = resolve_master_password(master_password, &self.path);
+        let salt = generate_salt();
+        let key = derive_master_key(&password, &salt)?;
+        self.encryption = EncryptionMetadata::new(key, salt.to_vec());
+        self.persist()
+    }
+
+    fn persist(&mut self) -> Result<()> {
+        let mut payload = self.file.clone();
+        payload.normalize_default();
+
+        let key = self.encryption.key();
+        let salt = self.encryption.salt();
+
+        encrypt_all_profiles(&mut payload.profiles, key, salt)?;
+
+        let serialized =
+            toml::to_string_pretty(&payload).map_err(|source| Error::ProfileStoreSerialize {
                 path: self.path.clone(),
                 source,
-            })
-            .and_then(|file| {
-                ensure_version(file.version)?;
-                Ok(file)
-            })
-    }
-}
-
-impl Encryption {
-    fn from_password(password: Option<String>) -> Self {
-        match password {
-            Some(pwd) if !pwd.is_empty() => Encryption::MasterPassword(MasterPasswordEncryption {
-                password: SecretString::new(pwd.into_boxed_str()),
-            }),
-            _ => Encryption::Plaintext,
-        }
-    }
-
-    fn decrypt(&self, file: &EncryptedProfilesFile, path: &Path) -> Result<String> {
-        match self {
-            Encryption::MasterPassword(master) => master.decrypt(&file.encryption, path),
-            Encryption::Plaintext => Err(Error::ProfileDecryption {
-                message: "profiles are encrypted, provide a master password".to_string(),
-            }),
-        }
-    }
-}
-
-impl MasterPasswordEncryption {
-    const ALGORITHM: &'static str = "CHACHA20POLY1305";
-
-    fn encrypt(&self, data: &[u8]) -> Result<EncryptedPayload> {
-        let mut rng = rng();
-        let mut salt = [0u8; 16];
-        rng.fill_bytes(&mut salt);
-        let params = KdfParams::default_argon2();
-        let key = self.derive_key(&params, &salt)?;
-
-        let mut nonce_bytes = [0u8; 12];
-        rng.fill_bytes(&mut nonce_bytes);
-        let cipher = ChaCha20Poly1305::new(&key);
-        let nonce = Nonce::from_slice(&nonce_bytes);
-        let ciphertext = cipher
-            .encrypt(nonce, data)
-            .map_err(|_| Error::ProfileEncryption {
-                message: "encryption failed".to_string(),
             })?;
 
-        Ok(EncryptedPayload {
-            algorithm: Self::ALGORITHM.to_string(),
-            kdf: params.to_info(),
-            salt: BASE64.encode(salt),
-            nonce: BASE64.encode(nonce_bytes),
-            data: BASE64.encode(ciphertext),
-        })
+        if let Some(parent) = self.path.parent() {
+            fs::create_dir_all(parent).map_err(|source| Error::ProfileStoreIo {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+            #[cfg(unix)]
+            {
+                let perms = fs::Permissions::from_mode(0o700);
+                fs::set_permissions(parent, perms).ok();
+            }
+        }
+
+        write_atomic(&self.path, serialized.as_bytes())?;
+        Ok(())
     }
 
-    fn decrypt(&self, payload: &EncryptedPayload, path: &Path) -> Result<String> {
-        if payload.algorithm != Self::ALGORITHM {
-            return Err(Error::ProfileDecryption {
-                message: "unsupported encryption algorithm".to_string(),
-            });
-        }
-        let params = KdfParams::parse(payload.kdf.clone())?;
-        let salt =
-            BASE64
-                .decode(payload.salt.as_bytes())
-                .map_err(|_| Error::ProfileDecryption {
-                    message: "invalid salt".to_string(),
-                })?;
-        let nonce_bytes =
-            BASE64
-                .decode(payload.nonce.as_bytes())
-                .map_err(|_| Error::ProfileDecryption {
-                    message: "invalid nonce".to_string(),
-                })?;
-        let ciphertext =
-            BASE64
-                .decode(payload.data.as_bytes())
-                .map_err(|_| Error::ProfileDecryption {
-                    message: "invalid ciphertext".to_string(),
-                })?;
-        let key = self.derive_key(&params, &salt)?;
-        let cipher = ChaCha20Poly1305::new(&key);
-        let expected_nonce_len = <ChaCha20Poly1305 as AeadCore>::NonceSize::to_usize();
-        if nonce_bytes.len() != expected_nonce_len {
-            return Err(Error::ProfileDecryption {
-                message: "invalid nonce length".to_string(),
-            });
-        }
-        let nonce = Nonce::from_slice(&nonce_bytes);
-        let plaintext =
-            cipher
-                .decrypt(nonce, ciphertext.as_ref())
-                .map_err(|_| Error::ProfileDecryption {
-                    message: "unable to decrypt profiles".to_string(),
-                })?;
-        String::from_utf8(plaintext).map_err(|err| Error::ProfileStoreUtf8 {
+    /// Read config file (field-level encryption)
+    fn read_file(
+        path: &Path,
+        master_password: Option<&SecretString>,
+    ) -> Result<(ProfileStoreFile, EncryptionMetadata)> {
+        // Resolve password once at the beginning
+        let password = resolve_master_password(master_password.cloned(), path);
+
+        let raw = fs::read(path).map_err(|source| Error::ProfileStoreIo {
             path: path.to_path_buf(),
-            source: err,
-        })
-    }
-
-    fn derive_key(&self, params: &KdfParams, salt: &[u8]) -> Result<Key> {
-        let argon_params = Argon2Params::new(
-            params.memory_kib,
-            params.iterations,
-            params.lanes,
-            Some(KEY_LENGTH),
-        )
-        .map_err(|_| Error::ProfileEncryption {
-            message: "invalid argon2 parameters".to_string(),
-        })?;
-        let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, argon_params);
-        let mut key_bytes = vec![0u8; KEY_LENGTH];
-        argon2
-            .hash_password_into(
-                self.password.expose_secret().as_bytes(),
-                salt,
-                &mut key_bytes,
-            )
-            .map_err(|_| Error::ProfileEncryption {
-                message: "argon2 derivation failed".to_string(),
-            })?;
-        let key = Key::from_slice(&key_bytes).to_owned();
-        key_bytes.fill(0);
-        Ok(key)
-    }
-}
-
-fn default_profiles_path() -> Result<PathBuf> {
-    if let Some(project_dirs) = ProjectDirs::from("dev", "Storify", "Storify") {
-        let mut path = project_dirs.config_dir().to_path_buf();
-        path.push(FILE_NAME);
-        Ok(path)
-    } else {
-        Err(Error::ProfileStoreUnavailable)
-    }
-}
-
-fn ensure_dir(path: Option<&Path>) -> Result<()> {
-    if let Some(dir) = path
-        && !dir.exists()
-    {
-        fs::create_dir_all(dir).map_err(|source| Error::ProfileStoreIo {
-            path: dir.to_path_buf(),
             source,
         })?;
-        set_secure_permissions(dir)?;
+
+        // Empty file: initialize with encryption
+        if raw.is_empty() {
+            let salt = generate_salt();
+            let key = derive_master_key(&password, &salt)?;
+            let encryption = EncryptionMetadata::new(key, salt.to_vec());
+            return Ok((ProfileStoreFile::default(), encryption));
+        }
+
+        let text = String::from_utf8(raw).map_err(|source| Error::ProfileStoreUtf8 {
+            path: path.to_path_buf(),
+            source,
+        })?;
+
+        let mut file: ProfileStoreFile =
+            toml::from_str(&text).map_err(|source| Error::ProfileStoreParse {
+                path: path.to_path_buf(),
+                source,
+            })?;
+
+        let salt = extract_salt_from_profiles(&file.profiles)?;
+
+        let key = derive_master_key(&password, &salt)?;
+
+        for profile in file.profiles.values_mut() {
+            decrypt_sensitive_field(&mut profile.access_key_id, &key)?;
+            decrypt_sensitive_field(&mut profile.access_key_secret, &key)?;
+        }
+
+        file.normalize_default();
+        let metadata = EncryptionMetadata::new(key, salt);
+        Ok((file, metadata))
+    }
+}
+
+/// Extract salt from profile store (searches all profiles)
+fn extract_salt_from_profiles(profiles: &BTreeMap<String, StoredProfile>) -> Result<Vec<u8>> {
+    for profile in profiles.values() {
+        if let Some(encrypted_ak) = &profile.access_key_id
+            && let Some(salt) = extract_salt(encrypted_ak)?
+        {
+            return Ok(salt);
+        }
+        if let Some(encrypted_sk) = &profile.access_key_secret
+            && let Some(salt) = extract_salt(encrypted_sk)?
+        {
+            return Ok(salt);
+        }
+    }
+
+    Err(Error::ProfileDecryption {
+        message:
+            "no encrypted fields found with embedded salt (expected format: ENC:v1:salt:ciphertext)"
+                .into(),
+    })
+}
+
+/// Encrypt all profiles' sensitive fields
+fn encrypt_all_profiles(
+    profiles: &mut BTreeMap<String, StoredProfile>,
+    key: &[u8; 32],
+    salt: &[u8],
+) -> Result<()> {
+    if profiles.is_empty() {
+        return Ok(());
+    }
+
+    let mut salt_embedded = false;
+
+    for profile in profiles.values_mut() {
+        // Encrypt access_key_id (embed salt if first field)
+        if let Some(value) = &profile.access_key_id {
+            profile.access_key_id = Some(if !salt_embedded {
+                salt_embedded = true;
+                encrypt_field_with_salt(value, key, salt)?
+            } else {
+                encrypt_field(value, key)?
+            });
+        }
+
+        // Encrypt access_key_secret (embed salt if first field)
+        if let Some(value) = &profile.access_key_secret {
+            profile.access_key_secret = Some(if !salt_embedded {
+                salt_embedded = true;
+                encrypt_field_with_salt(value, key, salt)?
+            } else {
+                encrypt_field(value, key)?
+            });
+        }
+    }
+
+    Ok(())
+}
+
+/// Decrypt sensitive field (automatically handles all formats)
+fn decrypt_sensitive_field(field: &mut Option<String>, key: &[u8; 32]) -> Result<()> {
+    if let Some(encrypted) = field {
+        *field = decrypt_field_auto(encrypted, key)?;
     }
     Ok(())
 }
 
-fn set_secure_permissions(path: &Path) -> Result<()> {
+/// RAII guard for temporary files (auto-cleanup on drop)
+struct TempFile {
+    path: PathBuf,
+    should_cleanup: bool,
+}
+
+impl TempFile {
+    fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            should_cleanup: true,
+        }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Mark file as persistent (don't cleanup on drop)
+    fn keep(mut self) {
+        self.should_cleanup = false;
+        // Drop will not trigger cleanup
+    }
+}
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        if self.should_cleanup && self.path.exists() {
+            // Best-effort cleanup (ignore errors)
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+
+/// Get default profile store path
+fn default_store_path() -> PathBuf {
+    const ENV_VARS: &[&str] = &["STORIFY_PROFILE_PATH", "STORIFY_CONFIG"];
+
+    ENV_VARS
+        .iter()
+        .find_map(|&var| env::var(var).ok().map(PathBuf::from))
+        .or_else(|| {
+            directories::BaseDirs::new().map(|base_dirs| {
+                base_dirs
+                    .home_dir()
+                    .join(".config")
+                    .join("storify")
+                    .join("profiles.toml")
+            })
+        })
+        .unwrap_or_else(|| {
+            // Fallback to current directory
+            env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .join("storify-profiles.toml")
+        })
+}
+
+fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
+    let parent = path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    let tmp_path = parent.join(format!(
+        ".{}.tmp-{}",
+        path.file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("storify"),
+        Uuid::new_v4().simple()
+    ));
+
+    let temp_file = TempFile::new(tmp_path);
+
+    write_atomic_inner(path, temp_file.path(), data)?;
+
+    temp_file.keep();
+    Ok(())
+}
+
+fn write_atomic_inner(path: &Path, tmp_path: &Path, data: &[u8]) -> Result<()> {
+    let mut options = OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+
+    // Set permissions atomically on creation (Unix only)
     #[cfg(unix)]
     {
-        use std::fs::Permissions;
-        use std::os::unix::fs::PermissionsExt;
-        let mode = if path.is_dir() { 0o700 } else { 0o600 };
-        let permissions = Permissions::from_mode(mode);
-        fs::set_permissions(path, permissions).map_err(|source| Error::ProfileStoreIo {
-            path: path.to_path_buf(),
+        options.mode(0o600);
+    }
+
+    let mut file = options
+        .open(tmp_path)
+        .map_err(|source| Error::ProfileStoreIo {
+            path: tmp_path.to_path_buf(),
             source,
         })?;
-    }
-    #[cfg(not(unix))]
-    {
-        use log::warn;
-        static PERMISSION_WARN_ONCE: Once = Once::new();
-        PERMISSION_WARN_ONCE.call_once(|| {
-            warn!(
-                "profile store permissions hardening is not available on this platform; check file ACLs manually"
-            );
-        });
-    }
-    Ok(())
-}
 
-fn ensure_version(version: u8) -> Result<()> {
-    if version == VERSION {
-        Ok(())
-    } else {
-        Err(Error::ProfileStoreVersion {
-            expected: VERSION,
-            found: version,
-        })
-    }
-}
+    file.write_all(data)
+        .map_err(|source| Error::ProfileStoreIo {
+            path: tmp_path.to_path_buf(),
+            source,
+        })?;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    file.sync_all().map_err(|source| Error::ProfileStoreIo {
+        path: tmp_path.to_path_buf(),
+        source,
+    })?;
 
-    fn temp_store(name: &str, password: Option<&str>) -> ProfileStore {
-        let mut path = std::env::temp_dir();
-        path.push(format!(
-            "storify-profile-test-{}-{}.toml",
-            name,
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        ProfileStore::with_path(path, password.map(|s| s.to_string()))
-    }
+    drop(file);
 
-    fn sample_profile(provider: &str) -> StoredProfile {
-        StoredProfile {
-            provider: provider.to_string(),
-            bucket: "bucket".into(),
-            access_key_id: Some("id".into()),
-            access_key_secret: Some("secret".into()),
-            endpoint: Some("https://endpoint".into()),
-            region: Some("ap-southeast-1".into()),
-            root_path: None,
-            name_node: None,
-            anonymous: false,
+    // Backup existing file with proper permissions
+    if path.exists() {
+        let backup = backup_path(path);
+        fs::copy(path, &backup).map_err(|source| Error::ProfileStoreIo {
+            path: backup.clone(),
+            source,
+        })?;
+
+        #[cfg(unix)]
+        {
+            let perms = fs::Permissions::from_mode(0o600);
+            fs::set_permissions(&backup, perms).map_err(|source| Error::ProfileStoreIo {
+                path: backup,
+                source,
+            })?;
         }
     }
 
-    fn cleanup(store: &ProfileStore) {
-        let path = store.path().to_path_buf();
-        fs::remove_file(&path).ok();
-        fs::remove_file(path.with_extension("bak")).ok();
-    }
+    // Atomic rename
+    fs::rename(tmp_path, path).map_err(|source| Error::ProfileStoreIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
 
-    #[test]
-    fn plain_round_trip() {
-        let store = temp_store("plain", None);
-        let profile = sample_profile("s3");
-        store
-            .save("dev", profile.clone(), true)
-            .expect("save plain profile");
-        let loaded = store
-            .load("dev")
-            .expect("load stored profile")
-            .expect("profile exists");
-        assert_eq!(loaded, profile);
-        assert_eq!(store.default_profile().unwrap(), Some("dev".into()));
-        cleanup(&store);
-    }
+    Ok(())
+}
 
-    #[test]
-    fn encrypted_round_trip() {
-        let store = temp_store("enc", Some("password"));
-        let profile = sample_profile("oss");
-        store
-            .save("prod", profile.clone(), true)
-            .expect("save encrypted profile");
-        let loaded = store
-            .load("prod")
-            .expect("load stored profile")
-            .expect("profile exists");
-        assert_eq!(loaded, profile);
-        let content = fs::read_to_string(store.path()).expect("read encrypted file");
-        assert!(content.contains("kdf"));
-        assert!(!content.contains("default_profile"));
-        cleanup(&store);
-    }
-
-    #[test]
-    fn profile_listing_redacts_sensitive_values() {
-        let store = temp_store("list", None);
-        store
-            .save("dev", sample_profile("s3"), true)
-            .expect("save profile");
-        let list = store.list_profiles_redacted().unwrap();
-        assert_eq!(list.len(), 1);
-        assert_eq!(list[0].0, "dev");
-        assert_eq!(list[0].1.access_key_id.as_deref(), Some("****"));
-        cleanup(&store);
-    }
-
-    #[test]
-    fn encrypted_store_requires_password() {
-        let store = temp_store("enc-required", Some("secret"));
-        store
-            .save("prod", sample_profile("oss"), true)
-            .expect("save encrypted profile");
-        let path = store.path().to_path_buf();
-        let no_password = ProfileStore::with_path(path.clone(), None);
-        let err = no_password
-            .load("prod")
-            .expect_err("missing password should fail");
-        assert!(matches!(err, Error::ProfileDecryption { .. }));
-        cleanup(&store);
-    }
+fn backup_path(path: &Path) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("profiles.toml");
+    path.with_file_name(format!("{file_name}.bak"))
 }

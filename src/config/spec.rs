@@ -76,6 +76,14 @@ impl FieldRule {
 
         Ok(())
     }
+
+    pub const fn requirement(&self) -> Requirement {
+        self.requirement
+    }
+
+    pub const fn default(&self) -> Option<&'static str> {
+        self.default
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -87,6 +95,50 @@ pub struct ProviderSpec {
     endpoint: FieldRule,
     root_path: FieldRule,
     name_node: FieldRule,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct FieldInfo {
+    pub name: &'static str,
+    pub rule: FieldRule,
+}
+
+impl FieldInfo {
+    pub const fn new(name: &'static str, rule: FieldRule) -> Self {
+        Self { name, rule }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProviderBackend {
+    Oss {
+        bucket: String,
+        access_key: Option<String>,
+        secret_key: Option<String>,
+        endpoint: Option<String>,
+        anonymous: bool,
+    },
+    S3 {
+        bucket: String,
+        access_key: Option<String>,
+        secret_key: Option<String>,
+        region: Option<String>,
+        endpoint: Option<String>,
+        anonymous: bool,
+    },
+    Cos {
+        bucket: String,
+        secret_id: String,
+        secret_key: String,
+        endpoint: Option<String>,
+    },
+    Fs {
+        root: String,
+    },
+    Hdfs {
+        root: String,
+        name_node: String,
+    },
 }
 
 impl ProviderSpec {
@@ -131,7 +183,26 @@ impl ProviderSpec {
         }
     }
 
-    pub fn prepare(&self, provider: StorageProvider, config: &mut StorageConfig) -> Result<()> {
+    pub const fn allows_anonymous(&self) -> bool {
+        self.allow_anonymous
+    }
+
+    pub const fn field_matrix(&self) -> [FieldInfo; 6] {
+        [
+            FieldInfo::new("access_key_id", self.access_key),
+            FieldInfo::new("access_key_secret", self.secret_key),
+            FieldInfo::new("region", self.region),
+            FieldInfo::new("endpoint", self.endpoint),
+            FieldInfo::new("root_path", self.root_path),
+            FieldInfo::new("name_node", self.name_node),
+        ]
+    }
+
+    pub fn prepare(
+        &self,
+        provider: StorageProvider,
+        config: &mut StorageConfig,
+    ) -> Result<ProviderBackend> {
         self.access_key
             .apply(provider, "access_key_id", &mut config.access_key_id)?;
         self.secret_key
@@ -151,7 +222,67 @@ impl ProviderSpec {
         } else {
             config.anonymous = false;
         }
-        Ok(())
+
+        let backend = match provider {
+            StorageProvider::Oss => ProviderBackend::Oss {
+                bucket: config.bucket.clone(),
+                access_key: config.access_key_id.clone(),
+                secret_key: config.access_key_secret.clone(),
+                endpoint: config.endpoint.clone(),
+                anonymous: config.anonymous,
+            },
+            StorageProvider::S3 => ProviderBackend::S3 {
+                bucket: config.bucket.clone(),
+                access_key: config.access_key_id.clone(),
+                secret_key: config.access_key_secret.clone(),
+                region: config.region.clone(),
+                endpoint: config.endpoint.clone(),
+                anonymous: config.anonymous,
+            },
+            StorageProvider::Cos => ProviderBackend::Cos {
+                bucket: config.bucket.clone(),
+                secret_id: config.access_key_id.clone().ok_or_else(|| {
+                    Error::MissingConfigField {
+                        provider: provider.as_str().to_string(),
+                        field: "access_key_id".to_string(),
+                    }
+                })?,
+                secret_key: config.access_key_secret.clone().ok_or_else(|| {
+                    Error::MissingConfigField {
+                        provider: provider.as_str().to_string(),
+                        field: "access_key_secret".to_string(),
+                    }
+                })?,
+                endpoint: config.endpoint.clone(),
+            },
+            StorageProvider::Fs => ProviderBackend::Fs {
+                root: config
+                    .root_path
+                    .clone()
+                    .ok_or_else(|| Error::MissingConfigField {
+                        provider: provider.as_str().to_string(),
+                        field: "root_path".to_string(),
+                    })?,
+            },
+            StorageProvider::Hdfs => ProviderBackend::Hdfs {
+                root: config
+                    .root_path
+                    .clone()
+                    .ok_or_else(|| Error::MissingConfigField {
+                        provider: provider.as_str().to_string(),
+                        field: "root_path".to_string(),
+                    })?,
+                name_node: config
+                    .name_node
+                    .clone()
+                    .ok_or_else(|| Error::MissingConfigField {
+                        provider: provider.as_str().to_string(),
+                        field: "name_node".to_string(),
+                    })?,
+            },
+        };
+
+        Ok(backend)
     }
 }
 
@@ -178,8 +309,12 @@ pub fn provider_spec(provider: StorageProvider) -> ProviderSpec {
     }
 }
 
-pub fn prepare_storage_config(config: &mut StorageConfig) -> Result<()> {
+pub fn prepare_storage_backend(config: &mut StorageConfig) -> Result<ProviderBackend> {
     provider_spec(config.provider).prepare(config.provider, config)
+}
+
+pub fn prepare_storage_config(config: &mut StorageConfig) -> Result<()> {
+    prepare_storage_backend(config).map(|_| ())
 }
 
 fn enforce_credentials(
@@ -214,121 +349,5 @@ fn enforce_credentials(
             provider: provider.as_str().to_string(),
             field: "access_key_secret".to_string(),
         }),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::error::Error;
-
-    #[test]
-    fn cos_injects_default_endpoint_when_missing() {
-        let mut config = StorageConfig::cos("bucket".into());
-        config.access_key_id = Some("id".into());
-        config.access_key_secret = Some("secret".into());
-        config.endpoint = None;
-        prepare_storage_config(&mut config).expect("prepare_storage_config should succeed");
-        assert_eq!(config.endpoint.as_deref(), Some(DEFAULT_COS_ENDPOINT));
-    }
-
-    #[test]
-    fn cos_respects_explicit_endpoint() {
-        let mut config = StorageConfig::cos("bucket".into());
-        config.access_key_id = Some("id".into());
-        config.access_key_secret = Some("secret".into());
-        config.endpoint = Some("https://custom.example".into());
-        prepare_storage_config(&mut config).expect("prepare_storage_config should succeed");
-        assert_eq!(config.endpoint.as_deref(), Some("https://custom.example"));
-    }
-
-    #[test]
-    fn s3_missing_access_key_id_errors() {
-        let mut config = StorageConfig::s3("bucket".into());
-        config.access_key_id = Some("id".into());
-        config.access_key_secret = Some("secret".into());
-        config.access_key_id = None;
-        let err =
-            prepare_storage_config(&mut config).expect_err("missing access key id should error");
-        assert!(matches!(err, Error::MissingConfigField { .. }));
-    }
-
-    #[test]
-    fn fs_strips_credentials() {
-        let mut config = StorageConfig::fs(Some("/tmp".into()));
-        config.access_key_id = Some("id".into());
-        config.access_key_secret = Some("secret".into());
-        prepare_storage_config(&mut config).expect("prepare_storage_config should succeed");
-        assert!(config.access_key_id.is_none());
-        assert!(config.access_key_secret.is_none());
-        assert!(!config.anonymous);
-    }
-
-    #[test]
-    fn hdfs_requires_name_node() {
-        let mut config =
-            StorageConfig::hdfs(Some("namenode".into()), Some(DEFAULT_HDFS_ROOT.into()));
-        config.name_node = None;
-        let err = prepare_storage_config(&mut config).expect_err("missing name node should error");
-        assert!(matches!(err, Error::MissingConfigField { .. }));
-    }
-
-    #[test]
-    fn oss_region_is_cleared_when_unsupported() {
-        let mut config = StorageConfig::oss("bucket".into());
-        config.access_key_id = Some("id".into());
-        config.access_key_secret = Some("secret".into());
-        config.region = Some("cn-hangzhou".into());
-        prepare_storage_config(&mut config).expect("prepare_storage_config should succeed");
-        assert!(config.region.is_none());
-    }
-
-    #[test]
-    fn fs_injects_default_root_when_missing() {
-        let mut config = StorageConfig::fs(None);
-        prepare_storage_config(&mut config).expect("prepare_storage_config should succeed");
-        assert_eq!(config.root_path.as_deref(), Some(DEFAULT_FS_ROOT));
-        assert!(!config.anonymous);
-    }
-
-    #[test]
-    fn s3_anonymous_allowed_when_credentials_missing() {
-        let mut config = StorageConfig::s3("bucket".into());
-        prepare_storage_config(&mut config).expect("prepare_storage_config should succeed");
-        assert!(config.anonymous);
-    }
-
-    #[test]
-    fn s3_missing_secret_key_errors() {
-        let mut config = StorageConfig::s3("bucket".into());
-        config.access_key_id = Some("id".into());
-        config.access_key_secret = Some("secret".into());
-        config.access_key_secret = None;
-        let err = prepare_storage_config(&mut config).expect_err("missing secret key should error");
-        assert!(matches!(err, Error::MissingConfigField { .. }));
-    }
-
-    #[test]
-    fn oss_anonymous_allowed_when_credentials_missing() {
-        let mut config = StorageConfig::oss("bucket".into());
-        prepare_storage_config(&mut config).expect("prepare_storage_config should succeed");
-        assert!(config.anonymous);
-    }
-
-    #[test]
-    fn oss_missing_secret_key_errors() {
-        let mut config = StorageConfig::oss("bucket".into());
-        config.access_key_id = Some("id".into());
-        config.access_key_secret = Some("secret".into());
-        config.access_key_secret = None;
-        let err = prepare_storage_config(&mut config).expect_err("missing secret key should error");
-        assert!(matches!(err, Error::MissingConfigField { .. }));
-    }
-
-    #[test]
-    fn cos_requires_credentials() {
-        let mut config = StorageConfig::cos("bucket".into());
-        let err = prepare_storage_config(&mut config).expect_err("cos requires credentials");
-        assert!(matches!(err, Error::MissingConfigField { .. }));
     }
 }

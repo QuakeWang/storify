@@ -1,27 +1,14 @@
-/// Utility functions for user interaction and common operations.
-use crate::error::Result;
-use std::io::{self, Write};
+//! Utility functions for user interaction and common operations.
 
-/// Prompt user for confirmation before performing potentially destructive operations.
-pub fn confirm_deletion(paths: &[String], force: bool) -> Result<bool> {
-    if force {
-        return Ok(true);
-    }
-
-    println!("About to delete {} item(s):", paths.len());
+/// Format deletion confirmation message with path list
+pub fn format_deletion_message(paths: &[String]) -> String {
+    let mut message = format!("About to delete {} item(s):\n", paths.len());
     for path in paths.iter().take(5) {
-        println!("  {path}");
+        message.push_str(&format!("  {}\n", path));
     }
     if paths.len() > 5 {
-        println!("  ... and {} more", paths.len() - 5);
+        message.push_str(&format!("  ... and {} more\n", paths.len() - 5));
     }
-
-    print!("Continue? (y/N): ");
-    io::stdout().flush()?;
-
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-
-    let trimmed = input.trim().to_lowercase();
-    Ok(trimmed == "y" || trimmed == "yes")
+    message.push_str("Continue?");
+    message
 }

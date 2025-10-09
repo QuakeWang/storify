@@ -102,9 +102,6 @@ pub enum Error {
     #[snafu(display("JSON serialization error: {source}"))]
     Json { source: serde_json::Error },
 
-    #[snafu(display("Profile store location unavailable"))]
-    ProfileStoreUnavailable,
-
     #[snafu(display("Failed to access profile store '{}': {source}", path.display()))]
     ProfileStoreIo {
         path: PathBuf,
@@ -123,14 +120,17 @@ pub enum Error {
         source: FromUtf8Error,
     },
 
-    #[snafu(display("Profile store version mismatch: expected {expected}, found {found}"))]
-    ProfileStoreVersion { expected: u8, found: u8 },
-
     #[snafu(display("Profile encryption error: {message}"))]
     ProfileEncryption { message: String },
 
     #[snafu(display("Profile decryption error: {message}"))]
     ProfileDecryption { message: String },
+
+    #[snafu(display(
+        "Profile store '{}' is encrypted; supply a master password",
+        path.display()
+    ))]
+    ProfileStoreLocked { path: PathBuf },
 
     #[snafu(display("Profile '{name}' not found"))]
     ProfileNotFound { name: String },
@@ -156,5 +156,15 @@ impl From<std::io::Error> for Error {
 impl From<serde_json::Error> for Error {
     fn from(error: serde_json::Error) -> Self {
         Error::Json { source: error }
+    }
+}
+
+impl Error {
+    pub fn non_interactive(action: &str) -> Self {
+        Error::InvalidArgument {
+            message: format!(
+                "{action} requires interactive input. Hint: rerun without --non-interactive or supply the needed flags (e.g. --bucket, --profile, --config-file)."
+            ),
+        }
     }
 }

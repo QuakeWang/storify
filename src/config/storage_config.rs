@@ -14,60 +14,50 @@ pub struct StorageConfig {
     pub anonymous: bool,
 }
 
+impl Default for StorageConfig {
+    fn default() -> Self {
+        Self {
+            provider: StorageProvider::Oss, // Placeholder, will be overridden
+            bucket: String::new(),
+            access_key_id: None,
+            access_key_secret: None,
+            endpoint: None,
+            region: None,
+            root_path: None,
+            name_node: None,
+            anonymous: false,
+        }
+    }
+}
+
 impl StorageConfig {
-    pub fn oss(bucket: String) -> Self {
+    /// Create a new storage configuration with the given provider and bucket
+    fn new(provider: StorageProvider, bucket: impl Into<String>) -> Self {
         Self {
-            provider: StorageProvider::Oss,
-            bucket,
-            access_key_id: None,
-            access_key_secret: None,
-            endpoint: None,
-            region: None,
-            root_path: None,
-            name_node: None,
-            anonymous: false,
+            provider,
+            bucket: bucket.into(),
+            ..Default::default()
         }
     }
 
-    pub fn s3(bucket: String) -> Self {
-        Self {
-            provider: StorageProvider::S3,
-            bucket,
-            access_key_id: None,
-            access_key_secret: None,
-            endpoint: None,
-            region: None,
-            root_path: None,
-            name_node: None,
-            anonymous: false,
-        }
+    pub fn oss(bucket: impl Into<String>) -> Self {
+        Self::new(StorageProvider::Oss, bucket)
     }
 
-    pub fn cos(bucket: String) -> Self {
-        Self {
-            provider: StorageProvider::Cos,
-            bucket,
-            access_key_id: None,
-            access_key_secret: None,
-            endpoint: None,
-            region: None,
-            root_path: None,
-            name_node: None,
-            anonymous: false,
-        }
+    pub fn s3(bucket: impl Into<String>) -> Self {
+        Self::new(StorageProvider::S3, bucket)
+    }
+
+    pub fn cos(bucket: impl Into<String>) -> Self {
+        Self::new(StorageProvider::Cos, bucket)
     }
 
     pub fn fs(root_path: Option<String>) -> Self {
         Self {
             provider: StorageProvider::Fs,
             bucket: "local".to_string(),
-            access_key_id: None,
-            access_key_secret: None,
-            endpoint: None,
-            region: None,
             root_path,
-            name_node: None,
-            anonymous: false,
+            ..Default::default()
         }
     }
 
@@ -75,13 +65,9 @@ impl StorageConfig {
         Self {
             provider: StorageProvider::Hdfs,
             bucket: "hdfs".to_string(),
-            access_key_id: None,
-            access_key_secret: None,
-            endpoint: None,
-            region: None,
-            root_path,
             name_node,
-            anonymous: false,
+            root_path,
+            ..Default::default()
         }
     }
 }
