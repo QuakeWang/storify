@@ -7,6 +7,8 @@ use crate::config::{
     storage_config::StorageConfig,
 };
 use crate::error::{Error, Result};
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64_ENGINE;
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -19,6 +21,9 @@ use uuid::Uuid;
 
 #[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+/// Salt file name (stored in the same directory as profiles.toml)
+const SALT_FILENAME: &str = ".encryption_salt";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StoredProfile {
@@ -167,6 +172,86 @@ impl ProfileStore {
         &self.path
     }
 
+    /// Get the path to the salt file (same directory as profiles.toml)
+    fn salt_file_path(profile_store_path: &Path) -> PathBuf {
+        profile_store_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(SALT_FILENAME)
+    }
+
+    /// Load salt from file, or generate and save a new one if not found
+    fn load_or_create_salt(profile_store_path: &Path) -> Result<Vec<u8>> {
+        let salt_path = Self::salt_file_path(profile_store_path);
+
+        if salt_path.exists() {
+            Self::read_salt_file(&salt_path)
+        } else {
+            let salt = generate_salt();
+            Self::write_salt_file(&salt_path, &salt)?;
+            Ok(salt.to_vec())
+        }
+    }
+
+    /// Read salt from the salt file
+    fn read_salt_file(salt_path: &Path) -> Result<Vec<u8>> {
+        let content = fs::read_to_string(salt_path).map_err(|source| Error::ProfileStoreIo {
+            path: salt_path.to_path_buf(),
+            source,
+        })?;
+
+        BASE64_ENGINE
+            .decode(content.trim())
+            .map_err(|_| Error::ProfileDecryption {
+                message: format!(
+                    "invalid salt file '{}': expected base64-encoded salt",
+                    salt_path.display()
+                ),
+            })
+    }
+
+    /// Write salt to the salt file with secure permissions
+    fn write_salt_file(salt_path: &Path, salt: &[u8]) -> Result<()> {
+        // Ensure parent directory exists
+        if let Some(parent) = salt_path.parent() {
+            fs::create_dir_all(parent).map_err(|source| Error::ProfileStoreIo {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+
+        let encoded = BASE64_ENGINE.encode(salt);
+
+        let mut options = OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+
+        // Set secure permissions on Unix (0600 - owner read/write only)
+        #[cfg(unix)]
+        {
+            options.mode(0o600);
+        }
+
+        let mut file = options
+            .open(salt_path)
+            .map_err(|source| Error::ProfileStoreIo {
+                path: salt_path.to_path_buf(),
+                source,
+            })?;
+
+        file.write_all(encoded.as_bytes())
+            .map_err(|source| Error::ProfileStoreIo {
+                path: salt_path.to_path_buf(),
+                source,
+            })?;
+
+        file.sync_all().map_err(|source| Error::ProfileStoreIo {
+            path: salt_path.to_path_buf(),
+            source,
+        })?;
+
+        Ok(())
+    }
+
     pub fn profile(&self, name: &str) -> Option<&StoredProfile> {
         self.file.profiles.get(name)
     }
@@ -205,11 +290,12 @@ impl ProfileStore {
 
     /// Delete a profile (returns error if not found)
     pub fn delete_profile(&mut self, name: &str) -> Result<()> {
-        self.file.profiles.remove(name).ok_or_else(|| {
-            Error::ProfileNotFound {
+        self.file
+            .profiles
+            .remove(name)
+            .ok_or_else(|| Error::ProfileNotFound {
                 name: name.to_string(),
-            }
-        })?;
+            })?;
 
         // Clear default if deleting the default profile
         if self.file.default.as_deref() == Some(name) {
@@ -286,9 +372,9 @@ impl ProfileStore {
 
         // Empty file: initialize with encryption
         if raw.is_empty() {
-            let salt = generate_salt();
+            let salt = Self::load_or_create_salt(path)?;
             let key = derive_master_key(&password, &salt)?;
-            let encryption = EncryptionMetadata::new(key, salt.to_vec());
+            let encryption = EncryptionMetadata::new(key, salt);
             return Ok((ProfileStoreFile::default(), encryption));
         }
 
@@ -303,7 +389,11 @@ impl ProfileStore {
                 source,
             })?;
 
-        let salt = extract_salt_from_profiles(&file.profiles)?;
+        // Load salt with backward compatibility:
+        // 1. Try to load from dedicated salt file (new format)
+        // 2. Fall back to extracting from encrypted fields (old format)
+        // 3. If old format is detected, migrate to new format by saving salt file
+        let salt = Self::load_salt_with_migration(path, &file.profiles)?;
 
         let key = derive_master_key(&password, &salt)?;
 
@@ -315,6 +405,31 @@ impl ProfileStore {
         file.normalize_default();
         let metadata = EncryptionMetadata::new(key, salt);
         Ok((file, metadata))
+    }
+
+    /// Load salt with backward compatibility and automatic migration
+    fn load_salt_with_migration(
+        path: &Path,
+        profiles: &BTreeMap<String, StoredProfile>,
+    ) -> Result<Vec<u8>> {
+        let salt_path = Self::salt_file_path(path);
+
+        // Priority 1: Load from dedicated salt file (new format)
+        if salt_path.exists() {
+            return Self::read_salt_file(&salt_path);
+        }
+
+        // Priority 2: Extract from encrypted fields (old format - backward compatibility)
+        if let Ok(salt) = extract_salt_from_profiles(profiles) {
+            // Automatic migration: save to salt file for future use
+            Self::write_salt_file(&salt_path, &salt)?;
+            return Ok(salt);
+        }
+
+        // Priority 3: Generate new salt (new profile store or no encrypted fields yet)
+        let salt = generate_salt();
+        Self::write_salt_file(&salt_path, &salt)?;
+        Ok(salt.to_vec())
     }
 }
 

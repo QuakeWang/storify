@@ -209,6 +209,12 @@ fn open_and_populate_store(
     request: &ConfigRequest,
     resolved: &mut ResolvedConfig,
 ) -> Result<Option<ProfileStore>> {
+    // Determine the actual path that will be used (matches ProfileStore::open_with_options logic)
+    let actual_path = request
+        .profile_store_path
+        .clone()
+        .unwrap_or_else(ProfileStore::default_path);
+
     match ProfileStore::open_with_options(ProfileStoreOpenOptions {
         path: request.profile_store_path.clone(),
         master_password: request.master_password.clone(),
@@ -226,6 +232,10 @@ fn open_and_populate_store(
             } else {
                 Ok(None)
             }
+        }
+        Err(Error::ProfileDecryption { .. }) => {
+            resolved.profile_store_path = Some(actual_path);
+            Ok(None)
         }
         Err(err) => Err(err),
     }
