@@ -509,6 +509,56 @@ impl StorageClient {
             recursive
         );
 
+        // When recursive is requested, avoid failing on NotFound for virtual prefixes (S3/OSS).
+        if recursive {
+            match self.operator.stat(path).await {
+                Ok(meta) => {
+                    if meta.mode().is_file() {
+                        return self
+                            .grep_file(path, pattern, ignore_case, line_number)
+                            .await;
+                    }
+                    // If it's a directory or other type, fall through to recursive listing.
+                }
+                Err(e) => {
+                    // NotFound likely indicates a virtual prefix; proceed to listing.
+                    if e.kind() != opendal::ErrorKind::NotFound {
+                        return Err(Error::GrepFailed {
+                            path: path.to_string(),
+                            source: Box::new(e.into()),
+                        });
+                    }
+                }
+            }
+
+            let lister = wrap_err!(
+                self.operator.lister_with(path).recursive(true).await,
+                ListDirectoryFailed {
+                    path: path.to_string()
+                }
+            )?;
+
+            futures::pin_mut!(lister);
+            while let Some(entry) =
+                lister
+                    .try_next()
+                    .await
+                    .map_err(|e| Error::ListDirectoryFailed {
+                        path: path.to_string(),
+                        source: Box::new(e.into_error()),
+                    })?
+            {
+                if entry.metadata().mode().is_file() {
+                    let greper = OpenDalGreper::new(self.operator.clone());
+                    greper
+                        .grep(entry.path(), pattern, ignore_case, line_number, true)
+                        .await?;
+                }
+            }
+            return Ok(());
+        }
+
+        // Non-recursive: require a real file; directories must use -R.
         let meta = self.operator.stat(path).await.map_err(|e| {
             if e.kind() == opendal::ErrorKind::NotFound {
                 Error::PathNotFound {
@@ -527,42 +577,10 @@ impl StorageClient {
                 .grep_file(path, pattern, ignore_case, line_number)
                 .await;
         }
-
         if meta.mode().is_dir() {
-            if !recursive {
-                return Err(Error::InvalidArgument {
-                    message: "Path is a directory; use -R to grep recursively".to_string(),
-                });
-            }
-
-            // Minimal recursive traversal: list recursively and grep each file
-            let lister = wrap_err!(
-                self.operator.lister_with(path).recursive(true).await,
-                ListDirectoryFailed {
-                    path: path.to_string()
-                }
-            )?;
-
-            // For now, run sequentially to keep implementation simple (KISS). Later we can add concurrency control.
-            futures::pin_mut!(lister);
-            while let Some(entry) =
-                lister
-                    .try_next()
-                    .await
-                    .map_err(|e| Error::ListDirectoryFailed {
-                        path: path.to_string(),
-                        source: Box::new(e.into_error()),
-                    })?
-            {
-                if entry.metadata().mode().is_file() {
-                    // For recursive searches, include filename in output
-                    let greper = OpenDalGreper::new(self.operator.clone());
-                    greper
-                        .grep(entry.path(), pattern, ignore_case, line_number, true)
-                        .await?;
-                }
-            }
-            return Ok(());
+            return Err(Error::InvalidArgument {
+                message: "Path is a directory; use -R to grep recursively".to_string(),
+            });
         }
 
         Err(Error::InvalidArgument {
