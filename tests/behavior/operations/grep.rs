@@ -10,7 +10,11 @@ pub fn tests(client: &StorageClient, tests: &mut Vec<Trial>) {
         test_grep_basic,
         test_grep_ignore_case,
         test_grep_line_number,
-        test_grep_chunk_boundary
+        test_grep_chunk_boundary,
+        test_grep_recursive_basic,
+        test_grep_recursive_ignore_case,
+        test_grep_recursive_line_number,
+        test_grep_directory_without_recursive_flag
     ));
 }
 
@@ -92,6 +96,117 @@ async fn test_grep_chunk_boundary(_client: StorageClient) -> Result<()> {
         .assert()
         .success()
         .stdout(predicate::str::contains("TARGET line here"));
+
+    Ok(())
+}
+
+async fn test_grep_recursive_basic(_client: StorageClient) -> Result<()> {
+    let env = E2eTestEnv::new().await;
+    let root_dir = TEST_FIXTURE.new_dir_path();
+    let sub_dir = format!("{root_dir}sub/");
+    env.verifier.operator().create_dir(&root_dir).await?;
+    env.verifier.operator().create_dir(&sub_dir).await?;
+
+    let root_file = format!("{root_dir}a.txt");
+    let sub_file = format!("{sub_dir}b.txt");
+    env.verifier
+        .operator()
+        .write(&root_file, b"foo\nmatch here\nbar\n".to_vec())
+        .await?;
+    env.verifier
+        .operator()
+        .write(&sub_file, b"nope\nTARGET in sub\n".to_vec())
+        .await?;
+
+    storify_cmd()
+        .arg("grep")
+        .arg("-R")
+        .arg("TARGET")
+        .arg(&root_dir)
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains(format!("{}:", sub_file))
+                .and(predicate::str::contains("TARGET in sub")),
+        );
+
+    Ok(())
+}
+
+async fn test_grep_recursive_ignore_case(_client: StorageClient) -> Result<()> {
+    let env = E2eTestEnv::new().await;
+    let root_dir = TEST_FIXTURE.new_dir_path();
+    let sub_dir = format!("{root_dir}nested/");
+    env.verifier.operator().create_dir(&root_dir).await?;
+    env.verifier.operator().create_dir(&sub_dir).await?;
+
+    let f1 = format!("{root_dir}x.txt");
+    let f2 = format!("{sub_dir}y.txt");
+    env.verifier
+        .operator()
+        .write(&f1, b"Alpha\nBeta\n".to_vec())
+        .await?;
+    env.verifier
+        .operator()
+        .write(&f2, b"gamma\nalpha\n".to_vec())
+        .await?;
+
+    storify_cmd()
+        .arg("grep")
+        .arg("-R")
+        .arg("-i")
+        .arg("alpha")
+        .arg(&root_dir)
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains(format!("{}:", f1))
+                .and(predicate::str::contains(format!("{}:", f2))),
+        );
+
+    Ok(())
+}
+
+async fn test_grep_recursive_line_number(_client: StorageClient) -> Result<()> {
+    let env = E2eTestEnv::new().await;
+    let root_dir = TEST_FIXTURE.new_dir_path();
+    env.verifier.operator().create_dir(&root_dir).await?;
+    let f = format!("{root_dir}ln.txt");
+    env.verifier
+        .operator()
+        .write(&f, b"first\nneedle\nthird\n".to_vec())
+        .await?;
+
+    storify_cmd()
+        .arg("grep")
+        .arg("-R")
+        .arg("-n")
+        .arg("needle")
+        .arg(&root_dir)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(format!("{}:2:needle", f)));
+
+    Ok(())
+}
+
+async fn test_grep_directory_without_recursive_flag(_client: StorageClient) -> Result<()> {
+    let env = E2eTestEnv::new().await;
+    let root_dir = TEST_FIXTURE.new_dir_path();
+    env.verifier.operator().create_dir(&root_dir).await?;
+    let f = format!("{root_dir}a.txt");
+    env.verifier
+        .operator()
+        .write(&f, b"hello\nworld\n".to_vec())
+        .await?;
+
+    storify_cmd()
+        .arg("grep")
+        .arg("hello")
+        .arg(&root_dir)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("use -R"));
 
     Ok(())
 }
