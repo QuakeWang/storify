@@ -1,8 +1,8 @@
 use crate::config::{
     StorageProvider,
     crypto::{
-        EncryptionMetadata, decrypt_field_auto, derive_master_key, encrypt_field,
-        encrypt_field_with_salt, extract_salt, generate_salt, resolve_master_password,
+        EncryptionMetadata, decrypt_field, derive_master_key, encrypt_field, generate_salt,
+        resolve_master_password,
     },
     storage_config::StorageConfig,
 };
@@ -195,19 +195,52 @@ impl ProfileStore {
 
     /// Read salt from the salt file
     fn read_salt_file(salt_path: &Path) -> Result<Vec<u8>> {
-        let content = fs::read_to_string(salt_path).map_err(|source| Error::ProfileStoreIo {
-            path: salt_path.to_path_buf(),
-            source,
+        let content = fs::read_to_string(salt_path).map_err(|source| {
+            if source.kind() == std::io::ErrorKind::NotFound {
+                Self::salt_file_not_found_error(salt_path)
+            } else {
+                Error::ProfileStoreIo {
+                    path: salt_path.to_path_buf(),
+                    source,
+                }
+            }
         })?;
 
         BASE64_ENGINE
             .decode(content.trim())
             .map_err(|_| Error::ProfileDecryption {
                 message: format!(
-                    "invalid salt file '{}': expected base64-encoded salt",
+                    "Invalid salt file '{}': expected base64-encoded salt",
                     salt_path.display()
                 ),
             })
+    }
+
+    /// Generate user-friendly error message when salt file is missing
+    fn salt_file_not_found_error(salt_path: &Path) -> Error {
+        let profiles_path = salt_path
+            .parent()
+            .map(|p| p.join("profiles.toml"))
+            .unwrap_or_else(|| PathBuf::from("profiles.toml"));
+
+        let message = format!(
+            concat!(
+                "Encryption salt file not found: {}\n",
+                "\n",
+                "The salt file is required to decrypt profiles.toml.\n",
+                "\n",
+                "If you've lost the salt file:\n",
+                "  • Delete profiles.toml and reconfigure:\n",
+                "      rm {}\n",
+                "      storify config create\n",
+                "\n",
+                "  • Or restore both files from backup together"
+            ),
+            salt_path.display(),
+            profiles_path.display()
+        );
+
+        Error::ProfileDecryption { message }
     }
 
     /// Write salt to the salt file with secure permissions
@@ -333,7 +366,7 @@ impl ProfileStore {
         let key = self.encryption.key();
         let salt = self.encryption.salt();
 
-        encrypt_all_profiles(&mut payload.profiles, key, salt)?;
+        encrypt_all_profiles(&mut payload.profiles, key)?;
 
         let serialized =
             toml::to_string_pretty(&payload).map_err(|source| Error::ProfileStoreSerialize {
@@ -395,7 +428,7 @@ impl ProfileStore {
                 source,
             })?;
 
-        let salt = Self::load_salt_with_migration(path, &file.profiles)?;
+        let salt = Self::load_salt(path)?;
 
         let key = derive_master_key(&password, &salt)?;
 
@@ -409,92 +442,40 @@ impl ProfileStore {
         Ok((file, metadata))
     }
 
-    /// Load salt with backward compatibility and automatic migration
-    fn load_salt_with_migration(
-        path: &Path,
-        profiles: &BTreeMap<String, StoredProfile>,
-    ) -> Result<Vec<u8>> {
+    /// Load salt from dedicated salt file
+    fn load_salt(path: &Path) -> Result<Vec<u8>> {
         let salt_path = Self::salt_file_path(path);
-
-        if salt_path.exists() {
-            return Self::read_salt_file(&salt_path);
-        }
-
-        if let Ok(salt) = extract_salt_from_profiles(profiles) {
-            // Automatic migration: save to salt file for future use
-            Self::write_salt_file(&salt_path, &salt)?;
-            return Ok(salt);
-        }
-
-        let salt = generate_salt();
-        Self::write_salt_file(&salt_path, &salt)?;
-        Ok(salt.to_vec())
+        Self::read_salt_file(&salt_path)
     }
-}
-
-/// Extract salt from profile store (searches all profiles)
-fn extract_salt_from_profiles(profiles: &BTreeMap<String, StoredProfile>) -> Result<Vec<u8>> {
-    for profile in profiles.values() {
-        if let Some(encrypted_ak) = &profile.access_key_id
-            && let Some(salt) = extract_salt(encrypted_ak)?
-        {
-            return Ok(salt);
-        }
-        if let Some(encrypted_sk) = &profile.access_key_secret
-            && let Some(salt) = extract_salt(encrypted_sk)?
-        {
-            return Ok(salt);
-        }
-    }
-
-    Err(Error::ProfileDecryption {
-        message:
-            "no encrypted fields found with embedded salt (expected format: ENC:v1:salt:ciphertext)"
-                .into(),
-    })
 }
 
 /// Encrypt all profiles' sensitive fields
+///
+/// All fields use unified encryption format: `ENC:<base64([nonce:12][ciphertext:var])>`
+/// Salt is stored separately in `.encryption_salt` file.
 fn encrypt_all_profiles(
     profiles: &mut BTreeMap<String, StoredProfile>,
     key: &[u8; 32],
-    salt: &[u8],
 ) -> Result<()> {
-    if profiles.is_empty() {
-        return Ok(());
-    }
-
-    let mut salt_embedded = false;
-
     for profile in profiles.values_mut() {
-        // Encrypt access_key_id (embed salt if first field)
+        // Encrypt access_key_id
         if let Some(value) = &profile.access_key_id {
-            profile.access_key_id = Some(if !salt_embedded {
-                salt_embedded = true;
-                encrypt_field_with_salt(value, key, salt)?
-            } else {
-                encrypt_field(value, key)?
-            });
+            profile.access_key_id = Some(encrypt_field(value, key)?);
         }
 
-        // Encrypt access_key_secret (embed salt if first field)
+        // Encrypt access_key_secret
         if let Some(value) = &profile.access_key_secret {
-            profile.access_key_secret = Some(if !salt_embedded {
-                salt_embedded = true;
-                encrypt_field_with_salt(value, key, salt)?
-            } else {
-                encrypt_field(value, key)?
-            });
+            profile.access_key_secret = Some(encrypt_field(value, key)?);
         }
     }
 
     Ok(())
 }
 
-/// Decrypt sensitive field (automatically handles all formats)
+/// Decrypt sensitive field
 fn decrypt_sensitive_field(field: &mut Option<String>, key: &[u8; 32]) -> Result<()> {
     if let Some(encrypted) = field.as_mut()
-        && let Some(decrypted) = decrypt_field_auto(encrypted, key)?
+        && let Some(decrypted) = decrypt_field(encrypted, key)?
     {
         *encrypted = decrypted;
     }
