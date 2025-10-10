@@ -1,10 +1,13 @@
-/// This module handles Command Line Interface (CLI) related logic.
 use crate::error::{Error, Result};
 use crate::storage::{OutputFormat, StorageClient};
-use crate::utils::confirm_deletion;
-use clap::{Parser, Subcommand};
+use crate::utils::format_deletion_message;
+use clap::Args as ClapArgs;
+use tokio::runtime::Handle;
+use tokio::task;
 
-/// Custom parser to validate that a path is not empty.
+use super::context::CliContext;
+use super::entry::Command;
+
 fn parse_validated_path(path_str: &str) -> Result<String> {
     if path_str.trim().is_empty() {
         Err(Error::InvalidPath {
@@ -15,50 +18,7 @@ fn parse_validated_path(path_str: &str) -> Result<String> {
     }
 }
 
-/// Storify - A unified tool for managing object storage with HDFS-like interface
-#[derive(Parser, Debug)]
-#[command(
-    version = "0.1.0",
-    author = "WangErxi",
-    about = "A unified tool for managing object storage (OSS, S3, etc.)",
-    after_help = "Enjoy the unified experience!"
-)]
-pub struct Args {
-    #[command(subcommand)]
-    pub command: Commands,
-}
-
-#[derive(Subcommand, Debug)]
-pub enum Commands {
-    /// List directory contents
-    Ls(LsArgs),
-    /// Download files from remote to local
-    Get(GetArgs),
-    /// Show disk usage statistics
-    Du(DuArgs),
-    /// Upload files from local to remote
-    Put(PutArgs),
-    /// Remove files/directories from remote storage
-    Rm(RmArgs),
-    /// Copy files/directories from remote to remote
-    Cp(CpArgs),
-    /// Move files/directories from remote to remote
-    Mv(MvArgs),
-    /// Create directories in remote storage
-    Mkdir(MkdirArgs),
-    /// Display object metadata
-    Stat(StatArgs),
-    /// Display file contents
-    Cat(CatArgs),
-    /// Display beginning of file contents
-    Head(HeadArgs),
-    /// Display end of file contents
-    Tail(TailArgs),
-    /// Search for patterns in files
-    Grep(GrepArgs),
-}
-
-#[derive(Parser, Debug)]
+#[derive(ClapArgs, Debug, Clone)]
 pub struct LsArgs {
     /// The path to list
     #[arg(value_name = "PATH", value_parser = parse_validated_path)]
@@ -73,7 +33,7 @@ pub struct LsArgs {
     pub recursive: bool,
 }
 
-#[derive(Parser, Debug)]
+#[derive(ClapArgs, Debug, Clone)]
 pub struct GetArgs {
     /// The remote path to download from
     #[arg(value_name = "REMOTE", value_parser = parse_validated_path)]
@@ -84,7 +44,7 @@ pub struct GetArgs {
     pub local: String,
 }
 
-#[derive(Parser, Debug)]
+#[derive(ClapArgs, Debug, Clone)]
 pub struct DuArgs {
     /// The path to check usage for
     #[arg(value_name = "PATH", value_parser = parse_validated_path)]
@@ -95,7 +55,7 @@ pub struct DuArgs {
     pub summary: bool,
 }
 
-#[derive(Parser, Debug)]
+#[derive(ClapArgs, Debug, Clone)]
 pub struct PutArgs {
     /// The local path to upload from
     #[arg(value_name = "LOCAL", value_parser = parse_validated_path)]
@@ -110,7 +70,7 @@ pub struct PutArgs {
     pub recursive: bool,
 }
 
-#[derive(Parser, Debug)]
+#[derive(ClapArgs, Debug, Clone)]
 pub struct RmArgs {
     /// Remote path(s) to delete
     #[arg(value_name = "PATH", value_parser = parse_validated_path)]
@@ -125,7 +85,7 @@ pub struct RmArgs {
     pub force: bool,
 }
 
-#[derive(Parser, Debug)]
+#[derive(ClapArgs, Debug, Clone)]
 pub struct CpArgs {
     /// The remote path to copy from
     #[arg(value_name = "SRC", value_parser = parse_validated_path)]
@@ -136,7 +96,7 @@ pub struct CpArgs {
     pub dest_path: String,
 }
 
-#[derive(Parser, Debug)]
+#[derive(ClapArgs, Debug, Clone)]
 pub struct MvArgs {
     /// The remote path to move from
     #[arg(value_name = "SRC", value_parser = parse_validated_path)]
@@ -147,7 +107,7 @@ pub struct MvArgs {
     pub dest_path: String,
 }
 
-#[derive(Parser, Debug)]
+#[derive(ClapArgs, Debug, Clone)]
 pub struct MkdirArgs {
     /// The directory path to create
     #[arg(value_name = "PATH", value_parser = parse_validated_path)]
@@ -158,7 +118,7 @@ pub struct MkdirArgs {
     pub parents: bool,
 }
 
-#[derive(Parser, Debug)]
+#[derive(ClapArgs, Debug, Clone)]
 pub struct CatArgs {
     /// The remote file path to display
     #[arg(value_name = "PATH", value_parser = parse_validated_path)]
@@ -172,7 +132,7 @@ pub struct CatArgs {
     pub size_limit_mb: u64,
 }
 
-#[derive(Parser, Debug)]
+#[derive(ClapArgs, Debug, Clone)]
 pub struct StatArgs {
     /// The path to stat
     #[arg(value_name = "PATH", value_parser = parse_validated_path)]
@@ -187,7 +147,7 @@ pub struct StatArgs {
     pub raw: bool,
 }
 
-#[derive(Parser, Debug)]
+#[derive(ClapArgs, Debug, Clone)]
 pub struct HeadArgs {
     /// Remote file path(s) to display
     #[arg(value_name = "PATH", value_parser = parse_validated_path)]
@@ -210,7 +170,7 @@ pub struct HeadArgs {
     pub verbose: bool,
 }
 
-#[derive(Parser, Debug)]
+#[derive(ClapArgs, Debug, Clone)]
 pub struct TailArgs {
     /// Remote file path(s) to display
     #[arg(value_name = "PATH", value_parser = parse_validated_path)]
@@ -233,7 +193,7 @@ pub struct TailArgs {
     pub verbose: bool,
 }
 
-#[derive(Parser, Debug)]
+#[derive(ClapArgs, Debug, Clone)]
 pub struct GrepArgs {
     /// Pattern to search for
     pub pattern: String,
@@ -251,58 +211,68 @@ pub struct GrepArgs {
     pub line_number: bool,
 }
 
-pub async fn run(args: Args, client: StorageClient) -> Result<()> {
-    match args.command {
-        Commands::Ls(ls_args) => {
+pub async fn execute(command: &Command, ctx: &CliContext) -> Result<()> {
+    let config = ctx.storage_config()?;
+    let client = StorageClient::new(config.clone()).await?;
+
+    match command {
+        Command::Ls(ls_args) => {
             client
                 .list_directory(&ls_args.path, ls_args.long, ls_args.recursive)
                 .await?;
         }
-        Commands::Get(get_args) => {
+        Command::Get(get_args) => {
             client
                 .download_files(&get_args.remote, &get_args.local)
                 .await?;
         }
-        Commands::Du(du_args) => {
+        Command::Du(du_args) => {
             client.disk_usage(&du_args.path, du_args.summary).await?;
         }
-        Commands::Put(put_args) => {
+        Command::Put(put_args) => {
             client
                 .upload_files(&put_args.local, &put_args.remote, put_args.recursive)
                 .await?;
         }
-        Commands::Rm(rm_args) => {
-            if !confirm_deletion(&rm_args.paths, rm_args.force)? {
-                println!("Operation cancelled.");
-                return Ok(());
+        Command::Rm(rm_args) => {
+            if !rm_args.force {
+                let prompt = ctx.prompt();
+                let message = format_deletion_message(&rm_args.paths);
+                let confirmed = task::block_in_place(|| {
+                    Handle::current().block_on(prompt.confirm(&message, false))
+                })?;
+
+                if !confirmed {
+                    println!("Operation cancelled.");
+                    return Ok(());
+                }
             }
             client
                 .delete_files(&rm_args.paths, rm_args.recursive)
                 .await?;
         }
-        Commands::Cp(cp_args) => {
+        Command::Cp(cp_args) => {
             client
                 .copy_files(&cp_args.src_path, &cp_args.dest_path)
                 .await?;
         }
-        Commands::Mv(mv_args) => {
+        Command::Mv(mv_args) => {
             client
                 .move_files(&mv_args.src_path, &mv_args.dest_path)
                 .await?;
         }
-        Commands::Mkdir(mkdir_args) => {
+        Command::Mkdir(mkdir_args) => {
             client
                 .create_directory(&mkdir_args.path, mkdir_args.parents)
                 .await?;
         }
-        Commands::Cat(cat_args) => {
+        Command::Cat(cat_args) => {
             client
                 .cat_file(&cat_args.path, cat_args.force, cat_args.size_limit_mb)
                 .await?;
         }
-        Commands::Head(head_args) => {
+        Command::Head(head_args) => {
             if head_args.paths.len() <= 1 {
-                // Single file path; behave like classic head
                 let path = head_args.paths.first().ok_or_else(|| Error::InvalidPath {
                     path: "".to_string(),
                 })?;
@@ -321,7 +291,7 @@ pub async fn run(args: Args, client: StorageClient) -> Result<()> {
                     .await?;
             }
         }
-        Commands::Tail(tail_args) => {
+        Command::Tail(tail_args) => {
             if tail_args.paths.len() <= 1 {
                 let path = tail_args.paths.first().ok_or_else(|| Error::InvalidPath {
                     path: "".to_string(),
@@ -341,7 +311,7 @@ pub async fn run(args: Args, client: StorageClient) -> Result<()> {
                     .await?;
             }
         }
-        Commands::Stat(stat_args) => {
+        Command::Stat(stat_args) => {
             let format = if stat_args.json {
                 OutputFormat::Json
             } else if stat_args.raw {
@@ -351,7 +321,7 @@ pub async fn run(args: Args, client: StorageClient) -> Result<()> {
             };
             client.stat_metadata(&stat_args.path, format).await?;
         }
-        Commands::Grep(grep_args) => {
+        Command::Grep(grep_args) => {
             client
                 .grep_file(
                     &grep_args.path,
@@ -360,6 +330,9 @@ pub async fn run(args: Args, client: StorageClient) -> Result<()> {
                     grep_args.line_number,
                 )
                 .await?;
+        }
+        Command::Config(_) => {
+            unreachable!("Config commands are handled separately")
         }
     }
     Ok(())

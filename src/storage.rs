@@ -1,7 +1,10 @@
-use crate::config::prepare_storage_config;
+use crate::config::{ProviderBackend, prepare_storage_backend};
 pub use crate::config::{StorageProvider, storage_config::StorageConfig};
-use crate::error::{Error, Result};
+use crate::error::Result;
 use opendal::Operator;
+
+#[cfg(not(feature = "hdfs"))]
+use crate::error::Error;
 
 pub mod constants;
 mod operations;
@@ -33,25 +36,12 @@ pub struct StorageClient {
     provider: StorageProvider,
 }
 
-fn require_field<'a>(
-    provider: StorageProvider,
-    field: &str,
-    value: Option<&'a str>,
-) -> Result<&'a str> {
-    value.ok_or_else(|| Error::MissingConfigField {
-        provider: provider.as_str().to_string(),
-        field: field.to_string(),
-    })
-}
-
 impl StorageClient {
     pub async fn new(mut config: StorageConfig) -> Result<Self> {
-        prepare_storage_config(&mut config)?;
-        let operator = Self::build_operator(&config)?;
-        Ok(Self {
-            operator,
-            provider: config.provider,
-        })
+        let provider = config.provider;
+        let backend = prepare_storage_backend(&mut config)?;
+        let operator = Self::build_operator(provider, &backend)?;
+        Ok(Self { operator, provider })
     }
 
     pub fn provider(&self) -> StorageProvider {
@@ -62,79 +52,82 @@ impl StorageClient {
         &self.operator
     }
 
-    fn build_operator(config: &StorageConfig) -> Result<Operator> {
-        match config.provider {
-            StorageProvider::Oss => {
-                let mut builder = opendal::services::Oss::default().bucket(&config.bucket);
-                if config.anonymous {
+    #[allow(unused_variables)]
+    fn build_operator(provider: StorageProvider, backend: &ProviderBackend) -> Result<Operator> {
+        match backend {
+            ProviderBackend::Oss {
+                bucket,
+                access_key,
+                secret_key,
+                endpoint,
+                anonymous,
+            } => {
+                let mut builder = opendal::services::Oss::default().bucket(bucket);
+                if *anonymous {
                     builder = builder.allow_anonymous();
                 }
-                if let Some(access_key_id) = &config.access_key_id {
+                if let Some(access_key_id) = access_key.as_deref() {
                     builder = builder.access_key_id(access_key_id);
                 }
-                if let Some(access_key_secret) = &config.access_key_secret {
+                if let Some(access_key_secret) = secret_key.as_deref() {
                     builder = builder.access_key_secret(access_key_secret);
                 }
-                if let Some(endpoint) = &config.endpoint {
+                if let Some(endpoint) = endpoint.as_deref() {
                     builder = builder.endpoint(endpoint);
                 }
                 Ok(Operator::new(builder)?.finish())
             }
-            StorageProvider::S3 => {
-                let mut builder = opendal::services::S3::default().bucket(&config.bucket);
-                if config.anonymous {
+            ProviderBackend::S3 {
+                bucket,
+                access_key,
+                secret_key,
+                region,
+                endpoint,
+                anonymous,
+            } => {
+                let mut builder = opendal::services::S3::default().bucket(bucket);
+                if *anonymous {
                     builder = builder.allow_anonymous();
                 }
-                if let Some(access_key_id) = &config.access_key_id {
+                if let Some(access_key_id) = access_key.as_deref() {
                     builder = builder.access_key_id(access_key_id);
                 }
-                if let Some(secret_access_key) = &config.access_key_secret {
+                if let Some(secret_access_key) = secret_key.as_deref() {
                     builder = builder.secret_access_key(secret_access_key);
                 }
-                if let Some(region) = &config.region {
+                if let Some(region) = region.as_deref() {
                     builder = builder.region(region);
                 }
-                if let Some(endpoint) = &config.endpoint {
+                if let Some(endpoint) = endpoint.as_deref() {
                     builder = builder.endpoint(endpoint);
                 }
                 Ok(Operator::new(builder)?.finish())
             }
-            StorageProvider::Cos => {
-                let mut builder = opendal::services::Cos::default().bucket(&config.bucket);
-
-                if let Some(access_key_id) = &config.access_key_id {
-                    builder = builder.secret_id(access_key_id);
-                }
-                if let Some(secret_access_key) = &config.access_key_secret {
-                    builder = builder.secret_key(secret_access_key);
-                }
-                if let Some(endpoint) = &config.endpoint {
+            ProviderBackend::Cos {
+                bucket,
+                secret_id,
+                secret_key,
+                endpoint,
+            } => {
+                let mut builder = opendal::services::Cos::default().bucket(bucket);
+                builder = builder.secret_id(secret_id).secret_key(secret_key);
+                if let Some(endpoint) = endpoint.as_deref() {
                     builder = builder.endpoint(endpoint);
                 }
-
-                // COS credential fields are stored as access_key_id/access_key_secret and mapped to
-                // secret_id/secret_key when configuring the builder.
                 log::debug!(
                     "COS builder config: bucket={}, endpoint={:?}",
-                    config.bucket,
-                    config.endpoint,
+                    bucket,
+                    endpoint,
                 );
-
                 Ok(Operator::new(builder)?.finish())
             }
-            StorageProvider::Fs => {
-                let root =
-                    require_field(config.provider, "root_path", config.root_path.as_deref())?;
+            ProviderBackend::Fs { root } => {
                 let builder = opendal::services::Fs::default().root(root);
                 Ok(Operator::new(builder)?.finish())
             }
-            StorageProvider::Hdfs => {
+            ProviderBackend::Hdfs { root, name_node } => {
                 #[cfg(feature = "hdfs")]
                 {
-                    let root =
-                        require_field(config.provider, "root_path", config.root_path.as_deref())?;
-                    let name_node =
-                        require_field(config.provider, "name_node", config.name_node.as_deref())?;
                     let builder = opendal::services::Hdfs::default()
                         .root(root)
                         .name_node(name_node);
@@ -143,8 +136,9 @@ impl StorageClient {
 
                 #[cfg(not(feature = "hdfs"))]
                 {
+                    let _ = (root, name_node);
                     Err(Error::UnsupportedProvider {
-                        provider: "hdfs (feature disabled)".to_string(),
+                        provider: format!("{} (feature disabled)", provider.as_str()),
                     })
                 }
             }

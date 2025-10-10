@@ -1,25 +1,13 @@
 use clap::Parser;
 
-use storify::cli;
-use storify::error::Result;
-use storify::storage::StorageClient;
-
-use storify::cli::Args;
-use storify::config::loader::load_storage_config;
+use storify::cli::{Args, run};
 
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
 
-    if let Err(e) = run_app(args).await {
+    if let Err(e) = run(args).await {
         eprintln!("Error: {e}");
         std::process::exit(1);
     }
-}
-
-async fn run_app(args: Args) -> Result<()> {
-    let config = load_storage_config()?;
-    let client = StorageClient::new(config).await?;
-    cli::run(args, client).await?;
-    Ok(())
 }
