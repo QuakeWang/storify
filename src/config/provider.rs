@@ -9,6 +9,7 @@ pub enum StorageProvider {
     Cos,
     Fs,
     Hdfs,
+    Azblob,
 }
 
 impl FromStr for StorageProvider {
@@ -21,6 +22,7 @@ impl FromStr for StorageProvider {
             "cos" => Ok(Self::Cos),
             "fs" => Ok(Self::Fs),
             "hdfs" => Ok(Self::Hdfs),
+            "azblob" => Ok(Self::Azblob),
             _ => Err(Error::UnsupportedProvider {
                 provider: s.to_string(),
             }),
@@ -36,6 +38,7 @@ impl StorageProvider {
             StorageProvider::Cos => "cos",
             StorageProvider::Fs => "fs",
             StorageProvider::Hdfs => "hdfs",
+            StorageProvider::Azblob => "azblob",
         }
     }
 }

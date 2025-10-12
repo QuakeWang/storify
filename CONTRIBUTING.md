@@ -155,6 +155,13 @@ export STORAGE_REGION=us-east-1
 # Local filesystem (for testing)
 export STORAGE_PROVIDER=fs
 export STORAGE_ROOT_PATH=./test-storage
+
+# Azblob
+export STORAGE_PROVIDER=azblob
+export AZBLOB_CONTAINER=your-container
+export AZBLOB_ACCOUNT_NAME=Storage-accounts-name
+export AZBLOB_ACCOUNT_KEY=your-secret
+export AZBLOB_ENDPOINT=https://Storage-accounts-name.blob.core.windows.net/
 ```
 
 ## Project Structure

@@ -139,6 +139,12 @@ pub enum ProviderBackend {
         root: String,
         name_node: String,
     },
+    Azblob {
+        container: String,
+        account_name: Option<String>,
+        account_key: Option<String>,
+        endpoint: Option<String>,
+    },
 }
 
 impl ProviderSpec {
@@ -280,6 +286,12 @@ impl ProviderSpec {
                         field: "name_node".to_string(),
                     })?,
             },
+            StorageProvider::Azblob => ProviderBackend::Azblob {
+                container: config.bucket.clone(),
+                account_name: config.access_key_id.clone(),
+                account_key: config.access_key_secret.clone(),
+                endpoint: config.endpoint.clone(),
+            },
         };
 
         Ok(backend)
@@ -306,6 +318,9 @@ pub fn provider_spec(provider: StorageProvider) -> ProviderSpec {
             FieldRule::optional_with_default(DEFAULT_HDFS_ROOT),
             FieldRule::required(),
         ),
+        StorageProvider::Azblob => {
+            ProviderSpec::cloud(FieldRule::optional(), FieldRule::optional(), false)
+        }
     }
 }
 

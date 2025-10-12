@@ -144,6 +144,24 @@ impl StorageClient {
                     })
                 }
             }
+            ProviderBackend::Azblob {
+                container,
+                account_name,
+                account_key,
+                endpoint,
+            } => {
+                let mut builder = opendal::services::Azblob::default().container(container);
+                if let Some(account_name) = account_name.as_deref() {
+                    builder = builder.account_name(account_name);
+                }
+                if let Some(account_key) = account_key.as_deref() {
+                    builder = builder.account_key(account_key);
+                }
+                if let Some(endpoint) = endpoint.as_deref() {
+                    builder = builder.endpoint(endpoint);
+                }
+                Ok(Operator::new(builder)?.finish())
+            }
         }
     }
 

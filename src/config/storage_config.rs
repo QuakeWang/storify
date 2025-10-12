@@ -70,4 +70,12 @@ impl StorageConfig {
             ..Default::default()
         }
     }
+
+    pub fn azblob(container: impl Into<String>) -> Self {
+        Self {
+            provider: StorageProvider::Azblob,
+            bucket: container.into(),
+            ..Default::default()
+        }
+    }
 }

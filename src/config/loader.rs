@@ -97,6 +97,12 @@ const COS_SECRET_KEY_KEYS: &[&str] = &["STORAGE_ACCESS_KEY_SECRET", "COS_SECRET_
 const COS_REGION_KEYS: &[&str] = &["STORAGE_REGION", "COS_REGION"];
 const COS_ENDPOINT_KEYS: &[&str] = &["STORAGE_ENDPOINT", "COS_ENDPOINT"];
 
+const AZBLOB_BUCKET_KEYS: &[&str] = &["STORAGE_BUCKET", "AZBLOB_CONTAINER"];
+const AZBLOB_ACCESS_KEY_ID_KEYS: &[&str] = &["STORAGE_ACCESS_KEY_ID", "AZBLOB_ACCOUNT_NAME"];
+const AZBLOB_SECRET_KEY_KEYS: &[&str] = &["STORAGE_ACCESS_KEY_SECRET", "AZBLOB_ACCOUNT_KEY"];
+const AZBLOB_REGION_KEYS: &[&str] = &["STORAGE_REGION", "AZBLOB_REGION"];
+const AZBLOB_ENDPOINT_KEYS: &[&str] = &["STORAGE_ENDPOINT", "AZBLOB_ENDPOINT"];
+
 /// Provider-specific environment variable keys
 #[derive(Clone, Copy)]
 struct ProviderKeys {
@@ -169,6 +175,13 @@ fn provider_keys(provider: StorageProvider, raw_provider: &str) -> ProviderKeys 
         StorageProvider::Fs | StorageProvider::Hdfs => unreachable!(
             "provider '{}' does not use cloud environment keys",
             provider.as_str()
+        ),
+        StorageProvider::Azblob => ProviderKeys::new(
+            AZBLOB_BUCKET_KEYS,
+            AZBLOB_ACCESS_KEY_ID_KEYS,
+            AZBLOB_SECRET_KEY_KEYS,
+            AZBLOB_REGION_KEYS,
+            AZBLOB_ENDPOINT_KEYS,
         ),
     }
 }
@@ -358,9 +371,10 @@ fn load_env_config(
     let provider = StorageProvider::from_str(&provider_str)?;
 
     let env = match provider {
-        StorageProvider::Oss | StorageProvider::S3 | StorageProvider::Cos => {
-            load_cloud_env(provider, &provider_str, get)
-        }
+        StorageProvider::Oss
+        | StorageProvider::S3
+        | StorageProvider::Cos
+        | StorageProvider::Azblob => load_cloud_env(provider, &provider_str, get),
         StorageProvider::Fs => load_fs_env(get),
         StorageProvider::Hdfs => load_hdfs_env(get),
     }?;
@@ -420,6 +434,7 @@ fn build_config(env: RawConfigValues) -> Result<StorageConfig> {
         StorageProvider::Cos => StorageConfig::cos(require_bucket(&mut bucket, provider)?),
         StorageProvider::Fs => StorageConfig::fs(root_path.take()),
         StorageProvider::Hdfs => StorageConfig::hdfs(name_node.take(), root_path.take()),
+        StorageProvider::Azblob => StorageConfig::azblob(require_bucket(&mut bucket, provider)?),
     };
 
     config.access_key_id = access_key_id;
