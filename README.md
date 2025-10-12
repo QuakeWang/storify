@@ -54,7 +54,7 @@ storify config set myprofile
 Set your storage provider and credentials:
 
 ```bash
-# Choose provider: oss, s3, minio, cos, fs, or hdfs
+# Choose provider: oss, s3, minio, cos, fs, hdfs or azblob
 export STORAGE_PROVIDER=oss
 
 # Common configuration
@@ -195,25 +195,26 @@ storify stat path/to/file --raw    # raw key=value format
 | **COS** | Tencent Cloud Object Storage | ❌ No |
 | **FS** | Local Filesystem | ✅ Yes (always) |
 | **HDFS** | Hadoop Distributed File System | ❌ No |
+| **Azblob** | Azure Cloud Object Storage | ❌ No |
 
 ## Architecture
 
 Built on [OpenDAL](https://github.com/apache/opendal) for unified storage access.
 
 ```
-┌─────────────────────────────┐
-│       Storify CLI           │
-├─────────────────────────────┤
-│   Profile Store (Encrypted) │
-├─────────────────────────────┤
-│     Config Loader           │
-├─────────────────────────────┤
-│    Storage Client           │
-├─────────────────────────────┤
-│       OpenDAL               │
-├─────────────────────────────┤
-│ OSS │ S3 │ COS │ HDFS │ FS  │
-└─────────────────────────────┘
+┌─────────────────────────────────────┐
+│            Storify CLI              │
+├─────────────────────────────────────┤
+│       Profile Store (Encrypted)     │
+├─────────────────────────────────────┤
+│           Config Loader             │
+├─────────────────────────────────────┤
+│          Storage Client             │
+├─────────────────────────────────────┤
+│             OpenDAL                 │
+├─────────────────────────────────────┤
+│ OSS │ S3 │ COS │ HDFS │ FS │ Azblob │
+└─────────────────────────────────────┘
 ```
 
 ## Security

@@ -197,7 +197,10 @@ fn create_profile(args: &CreateArgs, ctx: &CliContext) -> Result<()> {
     let mut region = args.region.clone();
 
     match provider {
-        StorageProvider::Oss | StorageProvider::S3 | StorageProvider::Cos => {
+        StorageProvider::Oss
+        | StorageProvider::S3
+        | StorageProvider::Cos
+        | StorageProvider::Azblob => {
             if bucket.is_none() {
                 println!("Bucket name (required).");
                 bucket = Some(session.input_required(ctx, "Bucket", false)?);
@@ -257,6 +260,7 @@ fn create_profile(args: &CreateArgs, ctx: &CliContext) -> Result<()> {
         StorageProvider::Cos => StorageConfig::cos(bucket.expect("bucket required")),
         StorageProvider::Fs => StorageConfig::fs(root_path.clone()),
         StorageProvider::Hdfs => StorageConfig::hdfs(name_node.clone(), root_path.clone()),
+        StorageProvider::Azblob => StorageConfig::azblob(bucket.expect("bucket required")),
     };
 
     config.access_key_id = access_key_id;
