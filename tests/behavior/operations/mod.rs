@@ -2,6 +2,7 @@ pub mod cat;
 pub mod copy;
 pub mod delete;
 pub mod download;
+pub mod find;
 pub mod grep;
 pub mod head;
 pub mod list;

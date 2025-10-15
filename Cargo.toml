@@ -39,6 +39,8 @@ zeroize = { version = "1.8", features = ["derive"] }
 blake3 = "1.5"
 uuid = { version = "1.18.1", features = ["v4"] }
 memchr = "2"
+globset = "0.4"
+regex = "1"
 
 [dev-dependencies]
 assert_cmd = "2.0.17"

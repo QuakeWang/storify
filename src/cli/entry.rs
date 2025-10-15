@@ -83,6 +83,8 @@ pub enum Command {
     Tail(TailArgs),
     /// Search for patterns in files
     Grep(GrepArgs),
+    /// Find objects by name/regex/type
+    Find(super::storage::FindArgs),
 }
 
 #[derive(Subcommand, Debug, Clone)]

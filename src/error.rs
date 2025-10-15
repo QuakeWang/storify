@@ -90,6 +90,9 @@ pub enum Error {
     #[snafu(display("Failed to grep file '{path}': {source}"))]
     GrepFailed { path: String, source: Box<Error> },
 
+    #[snafu(display("Failed to find under '{path}': {source}"))]
+    FindFailed { path: String, source: Box<Error> },
+
     #[snafu(display("Invalid argument: {message}"))]
     InvalidArgument { message: String },
 

@@ -140,6 +140,11 @@ storify grep -i "pattern" path/to/file    # case-insensitive
 storify grep -n "pattern" path/to/file    # show line numbers
 storify grep -R "pattern" path/           # recursive
 
+# Find objects by name/regex/type
+storify find path/ --name '**/*.log'     # glob on full path
+storify find path/ --regex '.*\\.(csv|parquet)$'  # regex on full path
+storify find path/ --type f                # filter by type: f|d|o
+
 # Show disk usage
 storify du path/to/dir
 storify du path/to/dir -s          # summary only
@@ -171,6 +176,7 @@ storify stat path/to/file --raw    # raw key=value format
 | `head` | Display beginning of file | `-n` (lines), `-c` (bytes), `-q` (quiet), `-v` (verbose) |
 | `tail` | Display end of file | `-n` (lines), `-c` (bytes), `-q` (quiet), `-v` (verbose) |
 | `grep` | Search for patterns in files | `-i` (case-insensitive), `-n` (line numbers) ,`-R` (recursive) |
+| `find` | Find objects by name/regex/type | `--name <GLOB>`, `--regex <RE>`, `--type <f|d|o>` |
 | `rm` | Delete files/directories | `-R` (recursive), `-f` (force) |
 | `du` | Show disk usage | `-s` (summary) |
 | `stat` | Show object metadata | `--json`, `--raw` |
