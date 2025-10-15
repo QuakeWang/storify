@@ -20,6 +20,7 @@ fn main() -> Result<()> {
     operations::download::tests(&client, &mut tests);
     operations::head::tests(&client, &mut tests);
     operations::grep::tests(&client, &mut tests);
+    operations::find::tests(&client, &mut tests);
     operations::tail::tests(&client, &mut tests);
     operations::mkdir::tests(&client, &mut tests);
     operations::mv::tests(&client, &mut tests);

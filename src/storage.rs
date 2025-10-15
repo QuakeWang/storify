@@ -15,6 +15,7 @@ use self::operations::cat::OpenDalFileReader;
 use self::operations::copy::OpenDalCopier;
 use self::operations::delete::OpenDalDeleter;
 use self::operations::download::OpenDalDownloader;
+use self::operations::find::OpenDalFinder;
 use self::operations::grep::OpenDalGreper;
 use self::operations::head::OpenDalHeadReader;
 use self::operations::list::OpenDalLister;
@@ -604,5 +605,64 @@ impl StorageClient {
         Err(Error::InvalidArgument {
             message: format!("Unsupported object type for grep: {}", path),
         })
+    }
+
+    pub async fn find_paths(&self, args: &crate::cli::storage::FindArgs) -> Result<()> {
+        log::debug!(
+            "find_paths provider={:?} path={} name={:?} regex_present={} type={:?}",
+            self.provider,
+            args.path,
+            args.name,
+            args.regex.is_some(),
+            args.r#type,
+        );
+
+        // Prepare filters
+        let name_glob = if let Some(pattern) = &args.name {
+            let g = globset::Glob::new(pattern).map_err(|e| Error::InvalidArgument {
+                message: format!("invalid --name glob: {}", e),
+            })?;
+            Some(g.compile_matcher())
+        } else {
+            None
+        };
+
+        let regex = if let Some(re) = &args.regex {
+            Some(regex::Regex::new(re).map_err(|e| Error::InvalidArgument {
+                message: format!("invalid --regex: {}", e),
+            })?)
+        } else {
+            None
+        };
+
+        let type_filter = match args.r#type.as_deref() {
+            None => None,
+            Some("f") => Some(self::operations::find::EntryTypeFilter::File),
+            Some("d") => Some(self::operations::find::EntryTypeFilter::Dir),
+            Some("o") => Some(self::operations::find::EntryTypeFilter::Other),
+            Some(other) => {
+                return Err(Error::InvalidArgument {
+                    message: format!("invalid --type: {} (expected f|d|o)", other),
+                });
+            }
+        };
+
+        let finder = OpenDalFinder::new(self.operator.clone());
+        let opts = self::operations::find::FindOptions {
+            path: args.path.clone(),
+            name_glob,
+            regex,
+            type_filter,
+        };
+
+        self::operations::find::Finder::find(&finder, &opts)
+            .await
+            .map_err(|e| match e {
+                Error::PathNotFound { .. } => e,
+                other => Error::FindFailed {
+                    path: args.path.clone(),
+                    source: Box::new(other),
+                },
+            })
     }
 }

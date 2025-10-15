@@ -215,6 +215,26 @@ pub struct GrepArgs {
     pub recursive: bool,
 }
 
+#[derive(ClapArgs, Debug, Clone)]
+#[command(group = clap::ArgGroup::new("name_or_regex").args(["name", "regex"]).multiple(false))]
+pub struct FindArgs {
+    /// The path to search under (file or directory)
+    #[arg(value_name = "PATH", value_parser = parse_validated_path)]
+    pub path: String,
+
+    /// Glob pattern to match full path (e.g. **/*.log)
+    #[arg(long)]
+    pub name: Option<String>,
+
+    /// Regex to match full path
+    #[arg(long)]
+    pub regex: Option<String>,
+
+    /// Filter by entry type: f (file), d (dir), o (other)
+    #[arg(long = "type", value_name = "f|d|o")]
+    pub r#type: Option<String>,
+}
+
 pub async fn execute(command: &Command, ctx: &CliContext) -> Result<()> {
     let config = ctx.storage_config()?;
     let client = StorageClient::new(config.clone()).await?;
@@ -335,6 +355,9 @@ pub async fn execute(command: &Command, ctx: &CliContext) -> Result<()> {
                     grep_args.recursive,
                 )
                 .await?;
+        }
+        Command::Find(find_args) => {
+            client.find_paths(find_args).await?;
         }
         Command::Config(_) => {
             unreachable!("Config commands are handled separately")
