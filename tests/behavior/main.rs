@@ -28,6 +28,7 @@ fn main() -> Result<()> {
     operations::cat::tests(&client, &mut tests);
     operations::usage::tests(&client, &mut tests);
     operations::stat::tests(&client, &mut tests);
+    operations::tree::tests(&client, &mut tests);
 
     let _ = tracing_subscriber::fmt()
         .pretty()
