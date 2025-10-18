@@ -8,7 +8,7 @@ use super::{
     prompts::Prompt,
     storage::{
         self, CatArgs, CpArgs, DuArgs, GetArgs, GrepArgs, HeadArgs, LsArgs, MkdirArgs, MvArgs,
-        PutArgs, RmArgs, StatArgs, TailArgs,
+        PutArgs, RmArgs, StatArgs, TailArgs, TreeArgs,
     },
 };
 
@@ -85,6 +85,8 @@ pub enum Command {
     Grep(GrepArgs),
     /// Find objects by name/regex/type
     Find(super::storage::FindArgs),
+    /// View directory structure as a tree
+    Tree(TreeArgs),
 }
 
 #[derive(Subcommand, Debug, Clone)]

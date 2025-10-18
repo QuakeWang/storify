@@ -235,6 +235,21 @@ pub struct FindArgs {
     pub r#type: Option<String>,
 }
 
+#[derive(ClapArgs, Debug, Clone)]
+pub struct TreeArgs {
+    /// The path to show as a tree
+    #[arg(value_name = "PATH", value_parser = parse_validated_path)]
+    pub path: String,
+
+    /// Maximum depth to display (0 for unlimited)
+    #[arg(short = 'd', long = "depth")]
+    pub depth: Option<usize>,
+
+    /// Show directories only
+    #[arg(long = "dirs-only")]
+    pub dirs_only: bool,
+}
+
 pub async fn execute(command: &Command, ctx: &CliContext) -> Result<()> {
     let config = ctx.storage_config()?;
     let client = StorageClient::new(config.clone()).await?;
@@ -358,6 +373,11 @@ pub async fn execute(command: &Command, ctx: &CliContext) -> Result<()> {
         }
         Command::Find(find_args) => {
             client.find_paths(find_args).await?;
+        }
+        Command::Tree(tree_args) => {
+            client
+                .print_tree(&tree_args.path, tree_args.depth, tree_args.dirs_only)
+                .await?;
         }
         Command::Config(_) => {
             unreachable!("Config commands are handled separately")

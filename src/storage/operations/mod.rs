@@ -11,6 +11,7 @@ pub mod mkdir;
 pub mod mv;
 pub mod stat;
 pub mod tail;
+pub mod tree;
 pub mod upload;
 pub mod usage;
 
@@ -26,5 +27,6 @@ pub use mkdir::Mkdirer;
 pub use mv::Mover;
 pub use stat::Stater;
 pub use tail::Tailer;
+pub use tree::Treer;
 pub use upload::Uploader;
 pub use usage::UsageCalculator;

@@ -22,11 +22,12 @@ use self::operations::list::OpenDalLister;
 use self::operations::mkdir::OpenDalMkdirer;
 use self::operations::mv::OpenDalMover;
 use self::operations::tail::OpenDalTailReader;
+use self::operations::tree::OpenDalTreer;
 use self::operations::upload::OpenDalUploader;
 use self::operations::usage::OpenDalUsageCalculator;
 use self::operations::{
     Cater, Copier, Deleter, Downloader, Greper, Header, Lister, Mkdirer, Mover, Stater, Tailer,
-    Uploader, UsageCalculator,
+    Treer, Uploader, UsageCalculator,
 };
 use crate::storage::utils::error::IntoStorifyError;
 use crate::wrap_err;
@@ -181,6 +182,16 @@ impl StorageClient {
                 path: path.to_string()
             }
         )
+    }
+
+    pub async fn print_tree(
+        &self,
+        path: &str,
+        depth: Option<usize>,
+        dirs_only: bool,
+    ) -> Result<()> {
+        let treer = OpenDalTreer::new(self.operator.clone());
+        treer.tree(path, depth, dirs_only).await
     }
 
     pub async fn download_files(&self, remote_path: &str, local_path: &str) -> Result<()> {

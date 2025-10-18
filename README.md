@@ -145,6 +145,11 @@ storify find path/ --name '**/*.log'     # glob on full path
 storify find path/ --regex '.*\\.(csv|parquet)$'  # regex on full path
 storify find path/ --type f                # filter by type: f|d|o
 
+# Show directory structure as a tree
+storify tree path/to/dir              # show full tree
+storify tree path/to/dir -d 1         # limit depth to 1
+storify tree path/to/dir --dirs-only  # show directories only
+
 # Show disk usage
 storify du path/to/dir
 storify du path/to/dir -s          # summary only
@@ -178,6 +183,7 @@ storify stat path/to/file --raw    # raw key=value format
 | `grep` | Search for patterns in files | `-i` (case-insensitive), `-n` (line numbers) ,`-R` (recursive) |
 | `find` | Find objects by name/regex/type | `--name <GLOB>`, `--regex <RE>`, `--type <f|d|o>` |
 | `rm` | Delete files/directories | `-R` (recursive), `-f` (force) |
+| `tree` | View directory structure as a tree | `-d <DEPTH>`, `--dirs-only` |
 | `du` | Show disk usage | `-s` (summary) |
 | `stat` | Show object metadata | `--json`, `--raw` |
 
