@@ -1,10 +1,7 @@
 use crate::config::{ProviderBackend, prepare_storage_backend};
 pub use crate::config::{StorageProvider, storage_config::StorageConfig};
-use crate::error::Result;
+use crate::error::{Error, Result};
 use opendal::Operator;
-
-#[cfg(not(feature = "hdfs"))]
-use crate::error::Error;
 
 pub mod constants;
 mod operations;
