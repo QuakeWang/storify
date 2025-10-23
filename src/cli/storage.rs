@@ -250,6 +250,33 @@ pub struct TreeArgs {
     pub dirs_only: bool,
 }
 
+#[derive(ClapArgs, Debug, Clone)]
+pub struct DiffArgs {
+    /// The left file path
+    #[arg(value_name = "LEFT", value_parser = parse_validated_path)]
+    pub left: String,
+
+    /// The right file path
+    #[arg(value_name = "RIGHT", value_parser = parse_validated_path)]
+    pub right: String,
+
+    /// Number of context lines to show around changes
+    #[arg(short = 'U', long = "context", default_value_t = 3)]
+    pub context: usize,
+
+    /// Ignore whitespace differences
+    #[arg(short = 'w', long = "ignore-space")]
+    pub ignore_space: bool,
+
+    /// Limit total size of compared files in MB (0 disables)
+    #[arg(short = 's', long = "size-limit", default_value_t = 10)]
+    pub size_limit_mb: u64,
+
+    /// Bypass size-limit check
+    #[arg(short = 'f', long)]
+    pub force: bool,
+}
+
 pub async fn execute(command: &Command, ctx: &CliContext) -> Result<()> {
     let config = ctx.storage_config()?;
     let client = StorageClient::new(config.clone()).await?;
@@ -377,6 +404,18 @@ pub async fn execute(command: &Command, ctx: &CliContext) -> Result<()> {
         Command::Tree(tree_args) => {
             client
                 .print_tree(&tree_args.path, tree_args.depth, tree_args.dirs_only)
+                .await?;
+        }
+        Command::Diff(diff_args) => {
+            client
+                .diff_files(
+                    &diff_args.left,
+                    &diff_args.right,
+                    diff_args.context,
+                    diff_args.ignore_space,
+                    diff_args.size_limit_mb,
+                    diff_args.force,
+                )
                 .await?;
         }
         Command::Config(_) => {

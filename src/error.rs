@@ -93,6 +93,13 @@ pub enum Error {
     #[snafu(display("Failed to find under '{path}': {source}"))]
     FindFailed { path: String, source: Box<Error> },
 
+    #[snafu(display("Failed to diff '{src_path}' and '{dest_path}': {source}"))]
+    DiffFailed {
+        src_path: String,
+        dest_path: String,
+        source: Box<Error>,
+    },
+
     #[snafu(display("Invalid argument: {message}"))]
     InvalidArgument { message: String },
 
