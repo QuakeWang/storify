@@ -722,10 +722,9 @@ impl StorageClient {
         if left_meta.content_length() == right_meta.content_length() {
             let le = left_meta.etag();
             let re = right_meta.etag();
-            if let (Some(le), Some(re)) = (le, re)
-                && le == re
-            {
-                return Ok(());
+            match (le, re) {
+                (Some(le), Some(re)) if le == re => return Ok(()),
+                _ => {}
             }
         }
 
