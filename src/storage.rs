@@ -684,10 +684,6 @@ impl StorageClient {
         size_limit_mb: u64,
         force: bool,
     ) -> Result<()> {
-        // Quick short-circuit: identical paths
-        if left == right {
-            return Ok(());
-        }
         // Validate both paths are files
         let left_meta = self.operator.stat(left).await.map_err(|e| {
             if e.kind() == opendal::ErrorKind::NotFound {
@@ -716,6 +712,11 @@ impl StorageClient {
             return Err(Error::InvalidArgument {
                 message: "diff only supports files; directories are not supported".to_string(),
             });
+        }
+
+        // Short-circuit: identical paths (after existence/type validation)
+        if left == right {
+            return Ok(());
         }
 
         // Short-circuit when ETag and size match (content-identical for many providers)
