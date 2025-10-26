@@ -2,6 +2,7 @@
 pub mod cat;
 pub mod copy;
 pub mod delete;
+pub mod diff;
 pub mod download;
 pub mod find;
 pub mod grep;
@@ -19,6 +20,7 @@ pub mod usage;
 pub use cat::Cater;
 pub use copy::Copier;
 pub use delete::Deleter;
+pub use diff::Differ;
 pub use download::Downloader;
 pub use grep::Greper;
 pub use head::Header;

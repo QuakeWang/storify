@@ -7,8 +7,8 @@ use super::{
     context::CliContext,
     prompts::Prompt,
     storage::{
-        self, CatArgs, CpArgs, DuArgs, GetArgs, GrepArgs, HeadArgs, LsArgs, MkdirArgs, MvArgs,
-        PutArgs, RmArgs, StatArgs, TailArgs, TreeArgs,
+        self, CatArgs, CpArgs, DiffArgs, DuArgs, GetArgs, GrepArgs, HeadArgs, LsArgs, MkdirArgs,
+        MvArgs, PutArgs, RmArgs, StatArgs, TailArgs, TreeArgs,
     },
 };
 
@@ -87,6 +87,8 @@ pub enum Command {
     Find(super::storage::FindArgs),
     /// View directory structure as a tree
     Tree(TreeArgs),
+    /// Diff two files and print unified diff
+    Diff(DiffArgs),
 }
 
 #[derive(Subcommand, Debug, Clone)]

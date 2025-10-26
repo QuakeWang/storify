@@ -140,6 +140,12 @@ storify grep -i "pattern" path/to/file    # case-insensitive
 storify grep -n "pattern" path/to/file    # show line numbers
 storify grep -R "pattern" path/           # recursive
 
+# Diff two files (unified diff)
+storify diff left/file right/file          # unified diff with 3 lines context
+storify diff -U 1 left/file right/file     # set context lines
+storify diff -w left/file right/file       # ignore trailing whitespace
+storify diff --size-limit 1 -f left right  # size guard and force
+
 # Find objects by name/regex/type
 storify find path/ --name '**/*.log'     # glob on full path
 storify find path/ --regex '.*\\.(csv|parquet)$'  # regex on full path
@@ -186,6 +192,7 @@ storify stat path/to/file --raw    # raw key=value format
 | `tree` | View directory structure as a tree | `-d <DEPTH>`, `--dirs-only` |
 | `du` | Show disk usage | `-s` (summary) |
 | `stat` | Show object metadata | `--json`, `--raw` |
+| `diff` | Compare two files (unified diff) | `-U <N>` (context), `-w` (ignore-space), `--size-limit <MB>`, `-f` (force) |
 
 ### Config Commands
 

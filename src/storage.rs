@@ -11,6 +11,7 @@ pub use self::utils::OutputFormat;
 use self::operations::cat::OpenDalFileReader;
 use self::operations::copy::OpenDalCopier;
 use self::operations::delete::OpenDalDeleter;
+use self::operations::diff::OpenDalDiffer;
 use self::operations::download::OpenDalDownloader;
 use self::operations::find::OpenDalFinder;
 use self::operations::grep::OpenDalGreper;
@@ -23,8 +24,8 @@ use self::operations::tree::OpenDalTreer;
 use self::operations::upload::OpenDalUploader;
 use self::operations::usage::OpenDalUsageCalculator;
 use self::operations::{
-    Cater, Copier, Deleter, Downloader, Greper, Header, Lister, Mkdirer, Mover, Stater, Tailer,
-    Treer, Uploader, UsageCalculator,
+    Cater, Copier, Deleter, Differ, Downloader, Greper, Header, Lister, Mkdirer, Mover, Stater,
+    Tailer, Treer, Uploader, UsageCalculator,
 };
 use crate::storage::utils::error::IntoStorifyError;
 use crate::wrap_err;
@@ -672,5 +673,81 @@ impl StorageClient {
                     source: Box::new(other),
                 },
             })
+    }
+
+    pub async fn diff_files(
+        &self,
+        left: &str,
+        right: &str,
+        context: usize,
+        ignore_space: bool,
+        size_limit_mb: u64,
+        force: bool,
+    ) -> Result<()> {
+        // Validate both paths are files
+        let left_meta = self.operator.stat(left).await.map_err(|e| {
+            if e.kind() == opendal::ErrorKind::NotFound {
+                Error::PathNotFound {
+                    path: std::path::PathBuf::from(left),
+                }
+            } else {
+                Error::InvalidArgument {
+                    message: format!("Failed to stat '{}': {}", left, e),
+                }
+            }
+        })?;
+        let right_meta = self.operator.stat(right).await.map_err(|e| {
+            if e.kind() == opendal::ErrorKind::NotFound {
+                Error::PathNotFound {
+                    path: std::path::PathBuf::from(right),
+                }
+            } else {
+                Error::InvalidArgument {
+                    message: format!("Failed to stat '{}': {}", right, e),
+                }
+            }
+        })?;
+
+        if !left_meta.mode().is_file() || !right_meta.mode().is_file() {
+            return Err(Error::InvalidArgument {
+                message: "diff only supports files; directories are not supported".to_string(),
+            });
+        }
+
+        // Short-circuit: identical paths (after existence/type validation)
+        if left == right {
+            return Ok(());
+        }
+
+        // Short-circuit when ETag and size match (content-identical for many providers)
+        if left_meta.content_length() == right_meta.content_length() {
+            let le = left_meta.etag();
+            let re = right_meta.etag();
+            match (le, re) {
+                (Some(le), Some(re)) if le == re => return Ok(()),
+                _ => {}
+            }
+        }
+
+        // Size check (sum of both files)
+        let total_mb =
+            (left_meta.content_length() + right_meta.content_length()).div_ceil(1024 * 1024);
+        if size_limit_mb > 0 && total_mb > size_limit_mb && !force {
+            return Err(Error::InvalidArgument {
+                message: format!(
+                    "Files too large ({}MB > {}MB). Use --force to override",
+                    total_mb, size_limit_mb
+                ),
+            });
+        }
+
+        let differ = OpenDalDiffer::new(self.operator.clone());
+        wrap_err!(
+            differ.diff(left, right, context, ignore_space).await,
+            DiffFailed {
+                src_path: left.to_string(),
+                dest_path: right.to_string()
+            }
+        )
     }
 }
