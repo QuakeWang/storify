@@ -8,7 +8,7 @@ use super::{
     prompts::Prompt,
     storage::{
         self, CatArgs, CpArgs, DiffArgs, DuArgs, GetArgs, GrepArgs, HeadArgs, LsArgs, MkdirArgs,
-        MvArgs, PutArgs, RmArgs, StatArgs, TailArgs, TreeArgs,
+        MvArgs, PutArgs, RmArgs, StatArgs, TailArgs, TouchArgs, TreeArgs,
     },
 };
 
@@ -89,6 +89,8 @@ pub enum Command {
     Tree(TreeArgs),
     /// Diff two files and print unified diff
     Diff(DiffArgs),
+    /// Create empty files or update metadata (best-effort)
+    Touch(TouchArgs),
 }
 
 #[derive(Subcommand, Debug, Clone)]

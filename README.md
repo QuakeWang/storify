@@ -169,7 +169,12 @@ storify rm path/to/dir -Rf         # recursive + force (no confirmation)
 storify stat path/to/file          # human-readable
 storify stat path/to/file --json   # JSON output
 storify stat path/to/file --raw    # raw key=value format
-```
+
+# Create files (touch)
+storify touch path/to/file                 # create if missing; no change if exists
+storify touch -t path/to/file              # truncate to 0 bytes if exists
+storify touch -c path/to/missing           # do not create; succeed silently
+storify touch -p path/to/nested/file       # create parents when applicable
 
 ## Command Reference
 
@@ -178,12 +183,13 @@ storify stat path/to/file --raw    # raw key=value format
 | Command | Description | Options |
 |---------|-------------|---------|
 | `ls` | List directory contents | `-L` (detailed), `-R` (recursive) |
-| `get` | Download files from remote | |
+| `get` | Download files from remote |
 | `put` | Upload files to remote | `-R` (recursive) |
-| `cp` | Copy files within storage | |
-| `mv` | Move/rename files within storage | |
+| `cp` | Copy files within storage |
+| `mv` | Move/rename files within storage | 
 | `mkdir` | Create directories | `-p` (create parents) |
-| `cat` | Display file contents | |
+| `touch` | Create files |
+| `cat` | Display file contents |
 | `head` | Display beginning of file | `-n` (lines), `-c` (bytes), `-q` (quiet), `-v` (verbose) |
 | `tail` | Display end of file | `-n` (lines), `-c` (bytes), `-q` (quiet), `-v` (verbose) |
 | `grep` | Search for patterns in files | `-i` (case-insensitive), `-n` (line numbers) ,`-R` (recursive) |

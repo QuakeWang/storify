@@ -100,6 +100,9 @@ pub enum Error {
         source: Box<Error>,
     },
 
+    #[snafu(display("Failed to touch '{path}': {source}"))]
+    TouchFailed { path: String, source: Box<Error> },
+
     #[snafu(display("Invalid argument: {message}"))]
     InvalidArgument { message: String },
 
