@@ -1,4 +1,6 @@
 use crate::error::{Error, Result};
+use crate::storage::operations::Mkdirer;
+use crate::storage::operations::mkdir::OpenDalMkdirer;
 use opendal::{ErrorKind, Operator};
 
 /// Trait for touching files in storage (create or truncate)
@@ -76,8 +78,8 @@ impl Toucher for OpenDalToucher {
                     && let Some(parent) = Self::parent_dir_of(path)
                     && !parent.is_empty()
                 {
-                    // best-effort create parent directory
-                    let _ = self.operator.create_dir(&parent).await;
+                    let mkdirer = OpenDalMkdirer::new(self.operator.clone());
+                    Mkdirer::mkdir(&mkdirer, &parent, true).await?;
                 }
                 let mut writer = self.operator.writer(path).await?;
                 writer.close().await?;
