@@ -20,16 +20,17 @@ use self::operations::list::OpenDalLister;
 use self::operations::mkdir::OpenDalMkdirer;
 use self::operations::mv::OpenDalMover;
 use self::operations::tail::OpenDalTailReader;
+use self::operations::touch::OpenDalToucher;
 use self::operations::tree::OpenDalTreer;
 use self::operations::upload::OpenDalUploader;
 use self::operations::usage::OpenDalUsageCalculator;
 use self::operations::{
     Cater, Copier, Deleter, Differ, Downloader, Greper, Header, Lister, Mkdirer, Mover, Stater,
-    Tailer, Treer, Uploader, UsageCalculator,
+    Tailer, Toucher, Treer, Uploader, UsageCalculator,
 };
 use crate::storage::utils::error::IntoStorifyError;
 use crate::wrap_err;
-use futures::stream::TryStreamExt;
+use futures::stream::{StreamExt, TryStreamExt};
 
 /// Unified storage client using OpenDAL
 #[derive(Clone)]
@@ -749,5 +750,41 @@ impl StorageClient {
                 dest_path: right.to_string()
             }
         )
+    }
+
+    pub async fn touch_files(
+        &self,
+        paths: &[String],
+        no_create: bool,
+        truncate: bool,
+        parents: bool,
+    ) -> Result<()> {
+        log::debug!(
+            "touch_files provider={:?} paths_count={} no_create={} truncate={} parents={}",
+            self.provider,
+            paths.len(),
+            no_create,
+            truncate,
+            parents
+        );
+
+        let concurrency: usize = 8;
+        futures::stream::iter(paths.iter().cloned())
+            .map(|p| {
+                let op = self.operator.clone();
+                async move {
+                    let toucher = OpenDalToucher::new(op);
+                    toucher
+                        .touch(&p, no_create, truncate, parents)
+                        .await
+                        .map_err(|e| Error::TouchFailed {
+                            path: p.clone(),
+                            source: Box::new(e),
+                        })
+                }
+            })
+            .buffer_unordered(concurrency)
+            .try_for_each(|_| async { Ok(()) })
+            .await
     }
 }

@@ -277,6 +277,25 @@ pub struct DiffArgs {
     pub force: bool,
 }
 
+#[derive(ClapArgs, Debug, Clone)]
+pub struct TouchArgs {
+    /// Remote path(s) to touch (create if not exists)
+    #[arg(value_name = "PATH", value_parser = parse_validated_path)]
+    pub paths: Vec<String>,
+
+    /// Do not create files; succeed silently if they do not exist
+    #[arg(short = 'c', long = "no-create")]
+    pub no_create: bool,
+
+    /// Truncate existing files to zero length (dangerous)
+    #[arg(short = 't', long = "truncate")]
+    pub truncate: bool,
+
+    /// Create parent directories when needed (filesystem providers)
+    #[arg(short = 'p', long = "parents")]
+    pub parents: bool,
+}
+
 pub async fn execute(command: &Command, ctx: &CliContext) -> Result<()> {
     let config = ctx.storage_config()?;
     let client = StorageClient::new(config.clone()).await?;
@@ -415,6 +434,21 @@ pub async fn execute(command: &Command, ctx: &CliContext) -> Result<()> {
                     diff_args.ignore_space,
                     diff_args.size_limit_mb,
                     diff_args.force,
+                )
+                .await?;
+        }
+        Command::Touch(touch_args) => {
+            if touch_args.paths.is_empty() {
+                return Err(Error::InvalidArgument {
+                    message: "missing PATH".to_string(),
+                });
+            }
+            client
+                .touch_files(
+                    &touch_args.paths,
+                    touch_args.no_create,
+                    touch_args.truncate,
+                    touch_args.parents,
                 )
                 .await?;
         }

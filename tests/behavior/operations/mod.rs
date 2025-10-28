@@ -11,6 +11,7 @@ pub mod mkdir;
 pub mod mv;
 pub mod stat;
 pub mod tail;
+pub mod touch;
 pub mod tree;
 pub mod upload;
 pub mod usage;
