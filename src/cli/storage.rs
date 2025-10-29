@@ -296,6 +296,33 @@ pub struct TouchArgs {
     pub parents: bool,
 }
 
+#[derive(ClapArgs, Debug, Clone)]
+pub struct TruncateArgs {
+    /// Remote path(s) to truncate
+    #[arg(value_name = "PATH", value_parser = parse_validated_path)]
+    pub paths: Vec<String>,
+
+    /// Target size in bytes (default: 0)
+    #[arg(long = "size", value_name = "BYTES", default_value_t = 0)]
+    pub size: u64,
+
+    /// Do not create files; succeed silently if they do not exist
+    #[arg(short = 'c', long = "no-create")]
+    pub no_create: bool,
+
+    /// Create parent directories when needed (filesystem providers)
+    #[arg(short = 'p', long = "parents")]
+    pub parents: bool,
+
+    /// Limit total bytes written per file in MB (0 disables)
+    #[arg(short = 's', long = "size-limit", default_value_t = 10)]
+    pub size_limit_mb: u64,
+
+    /// Bypass size-limit check
+    #[arg(short = 'f', long)]
+    pub force: bool,
+}
+
 pub async fn execute(command: &Command, ctx: &CliContext) -> Result<()> {
     let config = ctx.storage_config()?;
     let client = StorageClient::new(config.clone()).await?;
@@ -449,6 +476,23 @@ pub async fn execute(command: &Command, ctx: &CliContext) -> Result<()> {
                     touch_args.no_create,
                     touch_args.truncate,
                     touch_args.parents,
+                )
+                .await?;
+        }
+        Command::Truncate(trunc_args) => {
+            if trunc_args.paths.is_empty() {
+                return Err(Error::InvalidArgument {
+                    message: "missing PATH".to_string(),
+                });
+            }
+            client
+                .truncate_files(
+                    &trunc_args.paths,
+                    trunc_args.size,
+                    trunc_args.no_create,
+                    trunc_args.parents,
+                    trunc_args.size_limit_mb,
+                    trunc_args.force,
                 )
                 .await?;
         }

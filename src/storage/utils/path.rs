@@ -55,3 +55,19 @@ pub fn get_root_relative_path(full_path: &str, base_path: &str) -> String {
     rel = rel.replace("//", "/");
     rel
 }
+
+/// Return parent directory (with trailing '/') for a remote path, if any.
+/// Returns `None` when the path has no parent component.
+pub fn parent_dir_of(path: &str) -> Option<String> {
+    let trimmed = path.trim_matches('/');
+    if let Some(idx) = trimmed.rfind('/') {
+        let (dir, _) = trimmed.split_at(idx);
+        if dir.is_empty() {
+            Some(String::new())
+        } else {
+            Some(format!("{}/", dir))
+        }
+    } else {
+        None
+    }
+}
