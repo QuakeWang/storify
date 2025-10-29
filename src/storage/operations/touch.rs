@@ -1,6 +1,7 @@
 use crate::error::{Error, Result};
 use crate::storage::operations::Mkdirer;
 use crate::storage::operations::mkdir::OpenDalMkdirer;
+use crate::storage::utils::path::parent_dir_of;
 use opendal::{ErrorKind, Operator};
 
 /// Trait for touching files in storage (create or truncate)
@@ -21,20 +22,6 @@ pub struct OpenDalToucher {
 impl OpenDalToucher {
     pub fn new(operator: Operator) -> Self {
         Self { operator }
-    }
-
-    fn parent_dir_of(path: &str) -> Option<String> {
-        let trimmed = path.trim_matches('/');
-        if let Some(idx) = trimmed.rfind('/') {
-            let (dir, _) = trimmed.split_at(idx);
-            if dir.is_empty() {
-                Some(String::new())
-            } else {
-                Some(format!("{}/", dir))
-            }
-        } else {
-            None
-        }
     }
 }
 
@@ -75,7 +62,7 @@ impl Toucher for OpenDalToucher {
                 }
 
                 if parents
-                    && let Some(parent) = Self::parent_dir_of(path)
+                    && let Some(parent) = parent_dir_of(path)
                     && !parent.is_empty()
                 {
                     let mkdirer = OpenDalMkdirer::new(self.operator.clone());

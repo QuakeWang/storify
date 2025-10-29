@@ -14,6 +14,7 @@ pub mod stat;
 pub mod tail;
 pub mod touch;
 pub mod tree;
+pub mod truncate;
 pub mod upload;
 pub mod usage;
 
@@ -32,5 +33,6 @@ pub use stat::Stater;
 pub use tail::Tailer;
 pub use touch::Toucher;
 pub use tree::Treer;
+pub use truncate::Truncater;
 pub use upload::Uploader;
 pub use usage::UsageCalculator;

@@ -176,6 +176,12 @@ storify touch -t path/to/file              # truncate to 0 bytes if exists
 storify touch -c path/to/missing           # do not create; succeed silently
 storify touch -p path/to/nested/file       # create parents when applicable
 
+# Truncate files
+storify truncate path/to/file              # truncate to 0 bytes
+storify truncate --size 1024 path/to/file  # truncate to 1024 bytes
+storify truncate -c -s 0 missing           # no-create when missing
+storify truncate --size-limit 1 -f file    # size guard and force
+
 ## Command Reference
 
 ### Storage Commands
@@ -189,6 +195,7 @@ storify touch -p path/to/nested/file       # create parents when applicable
 | `mv` | Move/rename files within storage | 
 | `mkdir` | Create directories | `-p` (create parents) |
 | `touch` | Create files |
+| `truncate` | Truncate/extend files to a target size | `--size <BYTES>`, `-c` (no-create), `-p` (parents), `-s/--size-limit <MB>`, `-f` (force) |
 | `cat` | Display file contents |
 | `head` | Display beginning of file | `-n` (lines), `-c` (bytes), `-q` (quiet), `-v` (verbose) |
 | `tail` | Display end of file | `-n` (lines), `-c` (bytes), `-q` (quiet), `-v` (verbose) |

@@ -13,5 +13,6 @@ pub mod stat;
 pub mod tail;
 pub mod touch;
 pub mod tree;
+pub mod truncate;
 pub mod upload;
 pub mod usage;

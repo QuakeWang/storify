@@ -22,11 +22,12 @@ use self::operations::mv::OpenDalMover;
 use self::operations::tail::OpenDalTailReader;
 use self::operations::touch::OpenDalToucher;
 use self::operations::tree::OpenDalTreer;
+use self::operations::truncate::OpenDalTruncater;
 use self::operations::upload::OpenDalUploader;
 use self::operations::usage::OpenDalUsageCalculator;
 use self::operations::{
     Cater, Copier, Deleter, Differ, Downloader, Greper, Header, Lister, Mkdirer, Mover, Stater,
-    Tailer, Toucher, Treer, Uploader, UsageCalculator,
+    Tailer, Toucher, Treer, Truncater, Uploader, UsageCalculator,
 };
 use crate::storage::utils::error::IntoStorifyError;
 use crate::wrap_err;
@@ -778,6 +779,58 @@ impl StorageClient {
                         .touch(&p, no_create, truncate, parents)
                         .await
                         .map_err(|e| Error::TouchFailed {
+                            path: p.clone(),
+                            source: Box::new(e),
+                        })
+                }
+            })
+            .buffer_unordered(concurrency)
+            .try_for_each(|_| async { Ok(()) })
+            .await
+    }
+
+    pub async fn truncate_files(
+        &self,
+        paths: &[String],
+        size: u64,
+        no_create: bool,
+        parents: bool,
+        size_limit_mb: u64,
+        force: bool,
+    ) -> Result<()> {
+        log::debug!(
+            "truncate_files provider={:?} paths_count={} size={} no_create={} parents={} size_limit_mb={} force={}",
+            self.provider,
+            paths.len(),
+            size,
+            no_create,
+            parents,
+            size_limit_mb,
+            force
+        );
+
+        if size_limit_mb > 0 && !force {
+            let total_mb = size.div_ceil(1024 * 1024);
+            if total_mb > size_limit_mb {
+                return Err(Error::InvalidArgument {
+                    message: format!(
+                        "Files too large ({}MB > {}MB). Use --force to override",
+                        total_mb, size_limit_mb
+                    ),
+                });
+            }
+        }
+
+        let concurrency: usize = 8;
+        futures::stream::iter(paths.iter().cloned())
+            .map(|p| {
+                let op = self.operator.clone();
+                async move {
+                    let truncater = OpenDalTruncater::new(op);
+                    truncater
+                        .truncate(&p, size, no_create, parents)
+                        .await
+                        .map_err(|e| Error::TruncateFailed {
                             path: p.clone(),
                             source: Box::new(e),
                         })

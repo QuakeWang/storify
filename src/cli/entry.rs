@@ -8,7 +8,7 @@ use super::{
     prompts::Prompt,
     storage::{
         self, CatArgs, CpArgs, DiffArgs, DuArgs, GetArgs, GrepArgs, HeadArgs, LsArgs, MkdirArgs,
-        MvArgs, PutArgs, RmArgs, StatArgs, TailArgs, TouchArgs, TreeArgs,
+        MvArgs, PutArgs, RmArgs, StatArgs, TailArgs, TouchArgs, TreeArgs, TruncateArgs,
     },
 };
 
@@ -91,6 +91,8 @@ pub enum Command {
     Diff(DiffArgs),
     /// Create empty files or update metadata (best-effort)
     Touch(TouchArgs),
+    /// Truncate files to a specific size (default 0)
+    Truncate(TruncateArgs),
 }
 
 #[derive(Subcommand, Debug, Clone)]
