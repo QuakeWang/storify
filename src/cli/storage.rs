@@ -296,6 +296,46 @@ pub struct TouchArgs {
     pub parents: bool,
 }
 
+#[derive(ClapArgs, Debug, Clone)]
+#[command(group = clap::ArgGroup::new("stdin_or_src").args(["stdin", "src"]).multiple(false))]
+pub struct AppendArgs {
+    /// Remote destination file path
+    #[arg(value_name = "DEST", value_parser = parse_validated_path)]
+    pub dest: String,
+
+    /// Local source file to append (mutually exclusive with --stdin)
+    #[arg(long = "src", value_name = "SRC")]
+    pub src: Option<String>,
+
+    /// Read content from standard input
+    #[arg(long)]
+    pub stdin: bool,
+
+    /// Do not create the file if it doesn't exist
+    #[arg(short = 'c', long = "no-create")]
+    pub no_create: bool,
+
+    /// Create parent directories when needed (filesystem providers)
+    #[arg(short = 'p', long = "parents")]
+    pub parents: bool,
+
+    /// Limit total upload size (existing + new) in MB (0 disables)
+    #[arg(short = 's', long = "size-limit", default_value_t = 10)]
+    pub size_limit_mb: u64,
+
+    /// Bypass size-limit check
+    #[arg(short = 'f', long)]
+    pub force: bool,
+
+    /// Precondition: only append if current size equals this value
+    #[arg(long = "if-size")]
+    pub if_size: Option<u64>,
+
+    /// Precondition: only append if current ETag equals this value
+    #[arg(long = "if-etag")]
+    pub if_etag: Option<String>,
+}
+
 pub async fn execute(command: &Command, ctx: &CliContext) -> Result<()> {
     let config = ctx.storage_config()?;
     let client = StorageClient::new(config.clone()).await?;
@@ -451,6 +491,37 @@ pub async fn execute(command: &Command, ctx: &CliContext) -> Result<()> {
                     touch_args.parents,
                 )
                 .await?;
+        }
+        Command::Append(append_args) => {
+            if append_args.stdin {
+                let opts = crate::storage::AppendOptions {
+                    no_create: append_args.no_create,
+                    parents: append_args.parents,
+                    size_limit_mb: append_args.size_limit_mb,
+                    force: append_args.force,
+                    if_size: append_args.if_size,
+                    if_etag: append_args.if_etag.clone(),
+                };
+                client.append_from_stdin(&append_args.dest, opts).await?;
+            } else {
+                let src = append_args
+                    .src
+                    .as_ref()
+                    .ok_or_else(|| Error::InvalidArgument {
+                        message: "missing SRC".to_string(),
+                    })?;
+                let opts = crate::storage::AppendOptions {
+                    no_create: append_args.no_create,
+                    parents: append_args.parents,
+                    size_limit_mb: append_args.size_limit_mb,
+                    force: append_args.force,
+                    if_size: append_args.if_size,
+                    if_etag: append_args.if_etag.clone(),
+                };
+                client
+                    .append_from_local(src, &append_args.dest, opts)
+                    .await?;
+            }
         }
         Command::Config(_) => {
             unreachable!("Config commands are handled separately")

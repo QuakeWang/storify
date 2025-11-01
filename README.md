@@ -176,6 +176,11 @@ storify touch -t path/to/file              # truncate to 0 bytes if exists
 storify touch -c path/to/missing           # do not create; succeed silently
 storify touch -p path/to/nested/file       # create parents when applicable
 
+# Append data to file
+storify append path/to/file --src local.txt      # append local file to remote file
+echo "line" | storify append path/to/file --stdin  # append from stdin
+storify append path/to/file --src local.txt -c     # fail if missing (no-create)
+
 ## Command Reference
 
 ### Storage Commands
@@ -189,6 +194,7 @@ storify touch -p path/to/nested/file       # create parents when applicable
 | `mv` | Move/rename files within storage | 
 | `mkdir` | Create directories | `-p` (create parents) |
 | `touch` | Create files |
+| `append` | Append data to a remote file | `--src <PATH>` or `--stdin`, `-c` (no-create), `-p` (parents), `-s <MB>` (size-limit), `-f` (force) |
 | `cat` | Display file contents |
 | `head` | Display beginning of file | `-n` (lines), `-c` (bytes), `-q` (quiet), `-v` (verbose) |
 | `tail` | Display end of file | `-n` (lines), `-c` (bytes), `-q` (quiet), `-v` (verbose) |
