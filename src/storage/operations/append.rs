@@ -117,6 +117,38 @@ impl OpenDalAppender {
         }
         Ok(())
     }
+
+    fn ensure_unmodified(
+        before: Option<&opendal::Metadata>,
+        now: Option<&opendal::Metadata>,
+    ) -> Result<()> {
+        match (before, now) {
+            (None, None) => Ok(()),
+            (Some(_), None) | (None, Some(_)) => Err(Error::InvalidArgument {
+                message: "Concurrent modification detected: destination presence changed"
+                    .to_string(),
+            }),
+            (Some(b), Some(n)) => {
+                let b_etag = b.etag();
+                let n_etag = n.etag();
+                if b_etag.is_some() && n_etag.is_some() && b_etag != n_etag {
+                    return Err(Error::InvalidArgument {
+                        message: "Concurrent modification detected: destination ETag changed"
+                            .to_string(),
+                    });
+                }
+                let b_len = b.content_length();
+                let n_len = n.content_length();
+                if b_len != n_len {
+                    return Err(Error::InvalidArgument {
+                        message: "Concurrent modification detected: destination size changed"
+                            .to_string(),
+                    });
+                }
+                Ok(())
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -160,6 +192,15 @@ impl Appender for OpenDalAppender {
         merged.reserve(src_len as usize);
         let src = tokio::fs::read(local).await?;
         merged.extend_from_slice(&src);
+
+        // Revalidate just before write to detect concurrent modifications and
+        // ensure preconditions and size limits still hold against the latest metadata.
+        let meta_now = self.stat_remote(remote).await?;
+        Self::ensure_unmodified(meta.as_ref(), meta_now.as_ref())?;
+        Self::enforce_preconditions(meta_now.as_ref(), &opts.if_size, &opts.if_etag)?;
+        let existing_now = meta_now.as_ref().map(|m| m.content_length()).unwrap_or(0);
+        Self::enforce_size_limit(existing_now, src_len, opts.size_limit_mb, opts.force)?;
+
         self.write_remote(remote, merged, opts.parents).await
     }
 
@@ -198,6 +239,15 @@ impl Appender for OpenDalAppender {
         };
         merged.reserve(appended.len());
         merged.extend_from_slice(&appended);
+
+        // Revalidate just before write to detect concurrent modifications and
+        // ensure preconditions and size limits still hold against the latest metadata.
+        let meta_now = self.stat_remote(remote).await?;
+        Self::ensure_unmodified(meta.as_ref(), meta_now.as_ref())?;
+        Self::enforce_preconditions(meta_now.as_ref(), &opts.if_size, &opts.if_etag)?;
+        let existing_now = meta_now.as_ref().map(|m| m.content_length()).unwrap_or(0);
+        Self::enforce_size_limit(existing_now, total_new, opts.size_limit_mb, opts.force)?;
+
         self.write_remote(remote, merged, opts.parents).await
     }
 }
