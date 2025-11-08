@@ -801,14 +801,12 @@ impl StorageClient {
         opts: AppendOptions,
     ) -> Result<()> {
         log::debug!(
-            "append_from_local provider={:?} local_path={} remote_path={} no_create={} parents={} size_limit_mb={} force={}",
+            "append_from_local provider={:?} local_path={} remote_path={} no_create={} parents={}",
             self.provider,
             local_path,
             remote_path,
             opts.no_create,
-            opts.parents,
-            opts.size_limit_mb,
-            opts.force
+            opts.parents
         );
         let appender = OpenDalAppender::new(self.operator.clone());
         wrap_err!(
@@ -823,13 +821,11 @@ impl StorageClient {
 
     pub async fn append_from_stdin(&self, remote_path: &str, opts: AppendOptions) -> Result<()> {
         log::debug!(
-            "append_from_stdin provider={:?} remote_path={} no_create={} parents={} size_limit_mb={} force={}",
+            "append_from_stdin provider={:?} remote_path={} no_create={} parents={}",
             self.provider,
             remote_path,
             opts.no_create,
-            opts.parents,
-            opts.size_limit_mb,
-            opts.force
+            opts.parents
         );
         let appender = OpenDalAppender::new(self.operator.clone());
         wrap_err!(
