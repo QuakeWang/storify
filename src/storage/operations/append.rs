@@ -107,7 +107,8 @@ impl Appender for OpenDalAppender {
                 }
                 None => {
                     return Err(Error::InvalidArgument {
-                        message: "Destination object was deleted before append, operation aborted.".into(),
+                        message: "Destination object was deleted before append, operation aborted."
+                            .into(),
                     });
                 }
             }
@@ -151,7 +152,8 @@ impl Appender for OpenDalAppender {
                 }
                 None => {
                     return Err(Error::InvalidArgument {
-                        message: "Destination object was deleted before append, operation aborted.".into(),
+                        message: "Destination object was deleted before append, operation aborted."
+                            .into(),
                     });
                 }
             }
