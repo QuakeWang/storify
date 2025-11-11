@@ -91,6 +91,27 @@ impl Appender for OpenDalAppender {
         let src = tokio::fs::read(local).await?;
         merged.extend_from_slice(&src);
 
+        if let Some(meta_initial) = meta.as_ref() {
+            let meta_after = self.stat_remote(remote).await?;
+            match meta_after {
+                Some(ref latest) => {
+                    let etag1 = meta_initial.etag();
+                    let etag2 = latest.etag();
+                    if etag1.is_some() && etag2.is_some() {
+                        if etag1 != etag2 {
+                            return Err(Error::InvalidArgument { message: "Destination object was modified by another client before write (ETag changed), append aborted to avoid overwriting concurrent updates.".into() });
+                        }
+                    } else if meta_initial.content_length() != latest.content_length() {
+                        return Err(Error::InvalidArgument { message: "Destination object was modified by another client before write (size changed), append aborted to avoid overwriting concurrent updates.".into() });
+                    }
+                }
+                None => {
+                    return Err(Error::InvalidArgument {
+                        message: "Destination object was deleted before append, operation aborted.".into(),
+                    });
+                }
+            }
+        }
         self.write_remote(remote, merged, opts.parents).await
     }
 
@@ -113,6 +134,28 @@ impl Appender for OpenDalAppender {
         };
         merged.extend_from_slice(&new_data);
 
+        // 再次 stat 目标，防止并发覆盖
+        if let Some(meta_initial) = meta.as_ref() {
+            let meta_after = self.stat_remote(remote).await?;
+            match meta_after {
+                Some(ref latest) => {
+                    let etag1 = meta_initial.etag();
+                    let etag2 = latest.etag();
+                    if etag1.is_some() && etag2.is_some() {
+                        if etag1 != etag2 {
+                            return Err(Error::InvalidArgument { message: "Destination object was modified by another client before write (ETag changed), append aborted to avoid overwriting concurrent updates.".into() });
+                        }
+                    } else if meta_initial.content_length() != latest.content_length() {
+                        return Err(Error::InvalidArgument { message: "Destination object was modified by another client before write (size changed), append aborted to avoid overwriting concurrent updates.".into() });
+                    }
+                }
+                None => {
+                    return Err(Error::InvalidArgument {
+                        message: "Destination object was deleted before append, operation aborted.".into(),
+                    });
+                }
+            }
+        }
         self.write_remote(remote, merged, opts.parents).await
     }
 }
