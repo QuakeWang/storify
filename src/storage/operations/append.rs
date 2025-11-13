@@ -75,39 +75,74 @@ impl Appender for OpenDalAppender {
         remote: &str,
         opts: &AppendOptions,
     ) -> Result<()> {
-        let meta = self.stat_remote(remote).await?;
-        if meta.is_none() && opts.no_create {
+        let meta1 = self.stat_remote(remote).await?;
+        if meta1.is_none() && opts.no_create {
             return Err(Error::PathNotFound {
                 path: std::path::PathBuf::from(remote),
             });
         }
 
         // Merge existing + new
-        let mut merged = if meta.is_some() {
-            self.operator.read(remote).await?.to_vec()
-        } else {
-            Vec::new()
-        };
-        let src = tokio::fs::read(local).await?;
-        merged.extend_from_slice(&src);
-
-        if let Some(meta_initial) = meta.as_ref() {
-            let meta_after = self.stat_remote(remote).await?;
-            match meta_after {
-                Some(ref latest) => {
-                    let etag1 = meta_initial.etag();
-                    let etag2 = latest.etag();
+        let (mut merged, etag_stat2, size_stat2) = if let Some(meta) = meta1.as_ref() {
+            let buf = self.operator.read(remote).await?.to_vec();
+            let meta2 = self.stat_remote(remote).await?;
+            match meta2 {
+                Some(ref m2) => {
+                    let etag1 = meta.etag();
+                    let etag2 = m2.etag();
                     if etag1.is_some() && etag2.is_some() {
                         if etag1 != etag2 {
-                            return Err(Error::InvalidArgument { message: "Destination object was modified by another client before write (ETag changed), append aborted to avoid overwriting concurrent updates.".into() });
+                            return Err(Error::InvalidArgument { message: "Remote object changed during read (ETag mismatch after read), append aborted.".into() });
                         }
-                    } else if meta_initial.content_length() != latest.content_length() {
-                        return Err(Error::InvalidArgument { message: "Destination object was modified by another client before write (size changed), append aborted to avoid overwriting concurrent updates.".into() });
+                        (buf, etag2.map(|s| s.to_owned()), None)
+                    } else {
+                        let s1 = meta.content_length();
+                        let s2 = m2.content_length();
+                        if s1 != s2 || s2 != buf.len() as u64 {
+                            return Err(Error::InvalidArgument { message: "Remote object changed during read (size or byte count mismatch after read), append aborted.".into() });
+                        }
+                        (buf, None, Some(s2))
                     }
                 }
                 None => {
                     return Err(Error::InvalidArgument {
-                        message: "Destination object was deleted before append, operation aborted."
+                        message: "Remote object was deleted during read, append aborted.".into(),
+                    });
+                }
+            }
+        } else {
+            (Vec::new(), None, None)
+        };
+        let src = tokio::fs::read(local).await?;
+        merged.extend_from_slice(&src);
+
+        if let Some(meta2_etag) = etag_stat2.as_deref() {
+            let meta3 = self.stat_remote(remote).await?;
+            match meta3 {
+                Some(ref latest) => {
+                    let etag3 = latest.etag();
+                    if Some(meta2_etag) != etag3 {
+                        return Err(Error::InvalidArgument { message: "Remote object changed by another client before write (ETag mismatch), append aborted.".into() });
+                    }
+                }
+                None => {
+                    return Err(Error::InvalidArgument {
+                        message: "Remote object was deleted before append, operation aborted."
+                            .into(),
+                    });
+                }
+            }
+        } else if let Some(size2) = size_stat2 {
+            let meta3 = self.stat_remote(remote).await?;
+            match meta3 {
+                Some(ref latest) => {
+                    if latest.content_length() != size2 {
+                        return Err(Error::InvalidArgument { message: "Remote object changed by another client before write (size mismatch), append aborted.".into() });
+                    }
+                }
+                None => {
+                    return Err(Error::InvalidArgument {
+                        message: "Remote object was deleted before append, operation aborted."
                             .into(),
                     });
                 }
@@ -117,8 +152,8 @@ impl Appender for OpenDalAppender {
     }
 
     async fn append_from_stdin(&self, remote: &str, opts: &AppendOptions) -> Result<()> {
-        let meta = self.stat_remote(remote).await?;
-        if meta.is_none() && opts.no_create {
+        let meta1 = self.stat_remote(remote).await?;
+        if meta1.is_none() && opts.no_create {
             return Err(Error::PathNotFound {
                 path: std::path::PathBuf::from(remote),
             });
@@ -128,31 +163,65 @@ impl Appender for OpenDalAppender {
         let mut new_data = Vec::new();
         stdin.read_to_end(&mut new_data).await?;
 
-        let mut merged = if meta.is_some() {
-            self.operator.read(remote).await?.to_vec()
-        } else {
-            Vec::new()
-        };
-        merged.extend_from_slice(&new_data);
-
-        // 再次 stat 目标，防止并发覆盖
-        if let Some(meta_initial) = meta.as_ref() {
-            let meta_after = self.stat_remote(remote).await?;
-            match meta_after {
-                Some(ref latest) => {
-                    let etag1 = meta_initial.etag();
-                    let etag2 = latest.etag();
+        let (mut merged, etag_stat2, size_stat2) = if let Some(meta) = meta1.as_ref() {
+            let buf = self.operator.read(remote).await?.to_vec();
+            let meta2 = self.stat_remote(remote).await?;
+            match meta2 {
+                Some(ref m2) => {
+                    let etag1 = meta.etag();
+                    let etag2 = m2.etag();
                     if etag1.is_some() && etag2.is_some() {
                         if etag1 != etag2 {
-                            return Err(Error::InvalidArgument { message: "Destination object was modified by another client before write (ETag changed), append aborted to avoid overwriting concurrent updates.".into() });
+                            return Err(Error::InvalidArgument { message: "Remote object changed during read (ETag mismatch after read), append aborted.".into() });
                         }
-                    } else if meta_initial.content_length() != latest.content_length() {
-                        return Err(Error::InvalidArgument { message: "Destination object was modified by another client before write (size changed), append aborted to avoid overwriting concurrent updates.".into() });
+                        (buf, etag2.map(|s| s.to_owned()), None)
+                    } else {
+                        let s1 = meta.content_length();
+                        let s2 = m2.content_length();
+                        if s1 != s2 || s2 != buf.len() as u64 {
+                            return Err(Error::InvalidArgument { message: "Remote object changed during read (size or byte count mismatch after read), append aborted.".into() });
+                        }
+                        (buf, None, Some(s2))
                     }
                 }
                 None => {
                     return Err(Error::InvalidArgument {
-                        message: "Destination object was deleted before append, operation aborted."
+                        message: "Remote object was deleted during read, append aborted.".into(),
+                    });
+                }
+            }
+        } else {
+            (Vec::new(), None, None)
+        };
+        merged.extend_from_slice(&new_data);
+
+        if let Some(meta2_etag) = etag_stat2.as_deref() {
+            let meta3 = self.stat_remote(remote).await?;
+            match meta3 {
+                Some(ref latest) => {
+                    let etag3 = latest.etag();
+                    if Some(meta2_etag) != etag3 {
+                        return Err(Error::InvalidArgument { message: "Remote object changed by another client before write (ETag mismatch), append aborted.".into() });
+                    }
+                }
+                None => {
+                    return Err(Error::InvalidArgument {
+                        message: "Remote object was deleted before append, operation aborted."
+                            .into(),
+                    });
+                }
+            }
+        } else if let Some(size2) = size_stat2 {
+            let meta3 = self.stat_remote(remote).await?;
+            match meta3 {
+                Some(ref latest) => {
+                    if latest.content_length() != size2 {
+                        return Err(Error::InvalidArgument { message: "Remote object changed by another client before write (size mismatch), append aborted.".into() });
+                    }
+                }
+                None => {
+                    return Err(Error::InvalidArgument {
+                        message: "Remote object was deleted before append, operation aborted."
                             .into(),
                     });
                 }
