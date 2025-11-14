@@ -3,7 +3,14 @@ use opendal::Operator;
 use std::path::Path;
 use tokio::io::AsyncReadExt as TokioAsyncReadExt;
 
+/// Trait for appending data to remote objects (files) in object storage.
 pub trait Appender {
+    /// Append content from a local file to the remote object.
+    ///
+    /// # Arguments
+    /// * `local` - Local file path to append
+    /// * `remote` - Remote object path to append to
+    /// * `opts` - Options for creation/parent behavior
     async fn append_from_local(
         &self,
         local: &str,
@@ -11,6 +18,11 @@ pub trait Appender {
         opts: &AppendOptions,
     ) -> Result<()>;
 
+    /// Append data from process stdin to the remote object.
+    ///
+    /// # Arguments
+    /// * `remote` - Remote object path to append to
+    /// * `opts` - Options for creation/parent behavior
     async fn append_from_stdin(&self, remote: &str, opts: &AppendOptions) -> Result<()>;
 }
 
@@ -82,8 +94,7 @@ impl Appender for OpenDalAppender {
             });
         }
 
-        // Merge existing + new
-        let (mut merged, etag_stat2, size_stat2) = if let Some(meta) = meta1.as_ref() {
+        let (merged, etag_stat2, size_stat2) = if let Some(meta) = meta1.as_ref() {
             let buf = self.operator.read(remote).await?.to_vec();
             let meta2 = self.stat_remote(remote).await?;
             match meta2 {
@@ -94,7 +105,29 @@ impl Appender for OpenDalAppender {
                         if etag1 != etag2 {
                             return Err(Error::InvalidArgument { message: "Remote object changed during read (ETag mismatch after read), append aborted.".into() });
                         }
-                        (buf, etag2.map(|s| s.to_owned()), None)
+                        let mut merged = buf;
+                        merged.extend_from_slice(&tokio::fs::read(local).await?);
+                        if etag1.is_some() && etag2.is_some() {
+                            if etag1 != etag2 {
+                                return Err(Error::InvalidArgument { message: "Remote object changed during read (ETag mismatch after read), append aborted.".into() });
+                            }
+                            (merged, etag2.map(|s| s.to_owned()), None)
+                        } else {
+                            let s1 = meta.content_length();
+                            let s2 = m2.content_length();
+                            if s1 != s2
+                                || s2
+                                    != merged.len() as u64
+                                        - tokio::fs::read(local).await?.len() as u64
+                            {
+                                return Err(Error::InvalidArgument { message: "Remote object changed during read (size or byte count mismatch after read), append aborted.".into() });
+                            }
+                            (
+                                merged,
+                                None,
+                                Some(s2 + tokio::fs::read(local).await?.len() as u64),
+                            )
+                        }
                     } else {
                         let s1 = meta.content_length();
                         let s2 = m2.content_length();
@@ -111,10 +144,40 @@ impl Appender for OpenDalAppender {
                 }
             }
         } else {
-            (Vec::new(), None, None)
+            let src = tokio::fs::read(local).await?;
+            let merged = src;
+            let meta2 = self.stat_remote(remote).await?;
+            if let Some(ref m2) = meta2 {
+                let mut remote_buf = self.operator.read(remote).await?.to_vec();
+                let meta3 = self.stat_remote(remote).await?;
+                match meta3 {
+                    Some(ref m3) => {
+                        let etag2 = m2.etag();
+                        let etag3 = m3.etag();
+                        if etag2.is_some() && etag3.is_some() {
+                            if etag2 != etag3 {
+                                return Err(Error::InvalidArgument { message: "Remote object changed during concurrent creation (ETag mismatch), append aborted.".into() });
+                            }
+                            remote_buf.extend_from_slice(&tokio::fs::read(local).await?);
+                            (remote_buf, etag3.map(|s| s.to_owned()), None)
+                        } else {
+                            let s2 = m2.content_length();
+                            let s3 = m3.content_length();
+                            if s2 != s3 || s3 != remote_buf.len() as u64 {
+                                return Err(Error::InvalidArgument { message: "Remote object changed during concurrent creation (size or byte count mismatch), append aborted.".into() });
+                            }
+                            remote_buf.extend_from_slice(&tokio::fs::read(local).await?);
+                            (remote_buf, None, Some(s3))
+                        }
+                    }
+                    None => {
+                        return Err(Error::InvalidArgument { message: "Remote object was concurrently deleted after creation, append aborted.".into() });
+                    }
+                }
+            } else {
+                (merged, None, None)
+            }
         };
-        let src = tokio::fs::read(local).await?;
-        merged.extend_from_slice(&src);
 
         if let Some(meta2_etag) = etag_stat2.as_deref() {
             let meta3 = self.stat_remote(remote).await?;
@@ -163,20 +226,34 @@ impl Appender for OpenDalAppender {
         let mut new_data = Vec::new();
         stdin.read_to_end(&mut new_data).await?;
 
-        let (mut merged, etag_stat2, size_stat2) = if let Some(meta) = meta1.as_ref() {
+        let (merged, etag_stat2, size_stat2) = if let Some(meta0) = meta1.as_ref() {
             let buf = self.operator.read(remote).await?.to_vec();
             let meta2 = self.stat_remote(remote).await?;
             match meta2 {
                 Some(ref m2) => {
-                    let etag1 = meta.etag();
+                    let etag1 = meta0.etag();
                     let etag2 = m2.etag();
                     if etag1.is_some() && etag2.is_some() {
                         if etag1 != etag2 {
                             return Err(Error::InvalidArgument { message: "Remote object changed during read (ETag mismatch after read), append aborted.".into() });
                         }
-                        (buf, etag2.map(|s| s.to_owned()), None)
+                        let mut merged = buf;
+                        merged.extend_from_slice(&new_data);
+                        if etag1.is_some() && etag2.is_some() {
+                            if etag1 != etag2 {
+                                return Err(Error::InvalidArgument { message: "Remote object changed during read (ETag mismatch after read), append aborted.".into() });
+                            }
+                            (merged, etag2.map(|s| s.to_owned()), None)
+                        } else {
+                            let s1 = meta0.content_length();
+                            let s2 = m2.content_length();
+                            if s1 != s2 || s2 != merged.len() as u64 - new_data.len() as u64 {
+                                return Err(Error::InvalidArgument { message: "Remote object changed during read (size or byte count mismatch after read), append aborted.".into() });
+                            }
+                            (merged, None, Some(s2 + new_data.len() as u64))
+                        }
                     } else {
-                        let s1 = meta.content_length();
+                        let s1 = meta0.content_length();
                         let s2 = m2.content_length();
                         if s1 != s2 || s2 != buf.len() as u64 {
                             return Err(Error::InvalidArgument { message: "Remote object changed during read (size or byte count mismatch after read), append aborted.".into() });
@@ -191,9 +268,39 @@ impl Appender for OpenDalAppender {
                 }
             }
         } else {
-            (Vec::new(), None, None)
+            let merged = new_data.clone();
+            let meta2 = self.stat_remote(remote).await?;
+            if let Some(ref m2) = meta2 {
+                let mut remote_buf = self.operator.read(remote).await?.to_vec();
+                let meta3 = self.stat_remote(remote).await?;
+                match meta3 {
+                    Some(ref m3) => {
+                        let etag2 = m2.etag();
+                        let etag3 = m3.etag();
+                        if etag2.is_some() && etag3.is_some() {
+                            if etag2 != etag3 {
+                                return Err(Error::InvalidArgument { message: "Remote object changed during concurrent creation (ETag mismatch), append aborted.".into() });
+                            }
+                            remote_buf.extend_from_slice(&merged);
+                            (remote_buf, etag3.map(|s| s.to_owned()), None)
+                        } else {
+                            let s2 = m2.content_length();
+                            let s3 = m3.content_length();
+                            if s2 != s3 || s3 != remote_buf.len() as u64 {
+                                return Err(Error::InvalidArgument { message: "Remote object changed during concurrent creation (size or byte count mismatch), append aborted.".into() });
+                            }
+                            remote_buf.extend_from_slice(&merged);
+                            (remote_buf, None, Some(s3))
+                        }
+                    }
+                    None => {
+                        return Err(Error::InvalidArgument { message: "Remote object was concurrently deleted after creation, append aborted.".into() });
+                    }
+                }
+            } else {
+                (merged, None, None)
+            }
         };
-        merged.extend_from_slice(&new_data);
 
         if let Some(meta2_etag) = etag_stat2.as_deref() {
             let meta3 = self.stat_remote(remote).await?;
