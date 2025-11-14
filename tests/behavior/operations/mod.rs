@@ -1,3 +1,4 @@
+pub mod append;
 pub mod cat;
 pub mod copy;
 pub mod delete;

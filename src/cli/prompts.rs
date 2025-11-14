@@ -6,9 +6,10 @@ use tokio::task;
 use crate::error::{Error, Result};
 
 /// Interactive prompt mode for CLI operations
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub enum Prompt {
     /// Console-based interactive prompts using dialoguer
+    #[default]
     Console,
     /// Non-interactive mode that uses defaults or fails
     NonInteractive,
@@ -77,11 +78,7 @@ impl Prompt {
     }
 }
 
-impl Default for Prompt {
-    fn default() -> Self {
-        Self::Console
-    }
-}
+// Default is auto-derived above.
 
 fn join_error(err: task::JoinError) -> Error {
     Error::Io {

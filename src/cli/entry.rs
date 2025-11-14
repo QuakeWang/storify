@@ -7,8 +7,8 @@ use super::{
     context::CliContext,
     prompts::Prompt,
     storage::{
-        self, CatArgs, CpArgs, DiffArgs, DuArgs, GetArgs, GrepArgs, HeadArgs, LsArgs, MkdirArgs,
-        MvArgs, PutArgs, RmArgs, StatArgs, TailArgs, TouchArgs, TreeArgs,
+        self, AppendArgs, CatArgs, CpArgs, DiffArgs, DuArgs, GetArgs, GrepArgs, HeadArgs, LsArgs,
+        MkdirArgs, MvArgs, PutArgs, RmArgs, StatArgs, TailArgs, TouchArgs, TreeArgs,
     },
 };
 
@@ -91,6 +91,8 @@ pub enum Command {
     Diff(DiffArgs),
     /// Create empty files or update metadata (best-effort)
     Touch(TouchArgs),
+    /// Append data to a remote file
+    Append(AppendArgs),
 }
 
 #[derive(Subcommand, Debug, Clone)]
