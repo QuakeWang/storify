@@ -1,6 +1,15 @@
+mod cli;
+mod config;
+mod error;
+mod storage;
+mod utils;
+
+#[cfg(test)]
+mod tests;
+
 use clap::Parser;
 
-use storify::cli::{Args, run};
+use crate::cli::{Args, run};
 
 #[tokio::main]
 async fn main() {

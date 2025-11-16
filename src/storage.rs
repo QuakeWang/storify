@@ -47,10 +47,14 @@ impl StorageClient {
         Ok(Self { operator, provider })
     }
 
+    #[cfg(test)]
+    #[allow(dead_code)]
     pub fn provider(&self) -> StorageProvider {
         self.provider
     }
 
+    #[cfg(test)]
+    #[allow(dead_code)]
     pub fn operator(&self) -> &Operator {
         &self.operator
     }

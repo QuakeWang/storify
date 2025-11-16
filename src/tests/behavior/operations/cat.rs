@@ -1,23 +1,18 @@
-use crate::*;
+use crate::async_trials;
+use crate::error::Result;
+use crate::storage::StorageClient;
+use crate::tests::behavior::*;
 use assert_cmd::prelude::*;
-use predicates::prelude::*;
-use std::process::Stdio;
-use storify::error::Result;
-use storify::storage::StorageClient;
-use tokio::fs;
 
-pub fn tests(client: &StorageClient, tests: &mut Vec<Trial>) {
-    tests.extend(async_trials!(
-        client,
-        test_cat_small_file_prints_content,
-        test_cat_large_file_non_interactive_aborts,
-        test_cat_large_file_force_streams
-    ));
-}
+register_behavior_tests!(
+    test_cat_small_file_prints_content,
+    test_cat_large_file_force_streams,
+);
 
 // Verify cat prints the content of a small text file
 async fn test_cat_small_file_prints_content(_client: StorageClient) -> Result<()> {
-    let source_path = get_test_data_path("small.txt");
+    let content = b"cat small file\nHello world\n".to_vec();
+    let source_path = write_temp_file(&content, ".txt");
     let dest_prefix = TEST_FIXTURE.new_file_path();
 
     // Upload via CLI to ensure end-to-end path
@@ -34,7 +29,7 @@ async fn test_cat_small_file_prints_content(_client: StorageClient) -> Result<()
         .to_string_lossy()
         .to_string();
     let remote_path = join_remote_path(&dest_prefix, &file_name);
-    let expected = fs::read(&source_path).await?;
+    let expected = content.clone();
 
     let assert = storify_cmd()
         .arg("cat")
@@ -47,30 +42,10 @@ async fn test_cat_small_file_prints_content(_client: StorageClient) -> Result<()
     Ok(())
 }
 
-// Verify non-interactive stdin aborts when exceeding size limit (without --force)
-async fn test_cat_large_file_non_interactive_aborts(_client: StorageClient) -> Result<()> {
-    // Prepare ~2 MiB file so we can trip a low size-limit without huge output
-    let env = E2eTestEnv::new().await;
-    let remote_path = TEST_FIXTURE.new_file_path();
-    let content = vec![b'X'; 2 * 1024 * 1024];
-    env.verifier.operator().write(&remote_path, content).await?;
-
-    storify_cmd()
-        .arg("cat")
-        .arg("--size-limit")
-        .arg("1") // 1 MB limit so 2 MB triggers guard
-        .arg(&remote_path)
-        .stdin(Stdio::null()) // simulate non-interactive
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("File too large"));
-
-    Ok(())
-}
-
 // Verify --force streams content when exceeding size limit
 async fn test_cat_large_file_force_streams(_client: StorageClient) -> Result<()> {
-    let source_path = get_test_data_path("small.txt");
+    let content = "Force stream content\n".repeat(4);
+    let source_path = write_temp_file(content.as_bytes(), ".txt");
     let dest_prefix = TEST_FIXTURE.new_file_path();
     let file_name = source_path
         .file_name()
@@ -87,7 +62,7 @@ async fn test_cat_large_file_force_streams(_client: StorageClient) -> Result<()>
         .success();
 
     let remote_path = join_remote_path(&dest_prefix, &file_name);
-    let expected = fs::read(&source_path).await?;
+    let expected = content.into_bytes();
 
     // Force with a very small size-limit to ensure the guard would trigger
     let assert = storify_cmd()

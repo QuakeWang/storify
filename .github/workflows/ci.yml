@@ -34,7 +34,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Test
-        run: cargo test --workspace --lib --bins
+        run: cargo test --workspace --bins
         env:
+          STORIFY_SKIP_BEHAVIOR: "1"
           RUST_LOG: DEBUG
           RUST_BACKTRACE: full

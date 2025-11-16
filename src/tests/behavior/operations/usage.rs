@@ -1,12 +1,11 @@
-use crate::*;
+use crate::async_trials;
+use crate::error::Result;
+use crate::storage::StorageClient;
+use crate::tests::behavior::*;
 use assert_cmd::prelude::*;
 use predicates::prelude::*;
-use storify::error::Result;
-use storify::storage::StorageClient;
 
-pub fn tests(client: &StorageClient, tests: &mut Vec<Trial>) {
-    tests.extend(async_trials!(client, test_du_summary_total_size));
-}
+register_behavior_tests!(test_du_summary_total_size,);
 
 pub async fn test_du_summary_total_size(client: StorageClient) -> Result<()> {
     // Prepare a directory with files of deterministic sizes

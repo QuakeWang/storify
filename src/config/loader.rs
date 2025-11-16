@@ -332,28 +332,6 @@ pub fn resolve(request: ConfigRequest) -> Result<ResolvedConfig> {
     Ok(resolved)
 }
 
-/// Load storage configuration using environment variables only.
-pub fn load_storage_config() -> Result<StorageConfig> {
-    let resolved = resolve(ConfigRequest {
-        profile: None,
-        profile_store_path: None,
-        non_interactive: false,
-        require_storage: true,
-        master_password: None,
-    })?;
-
-    let storage = resolved.storage.ok_or_else(|| Error::NoConfiguration {
-        profiles: "none".to_string(),
-    })?;
-    Ok(storage)
-}
-
-pub fn load_env_storage_config(provider_hint: Option<String>) -> Result<StorageConfig> {
-    load_env_config(&env_value, provider_hint)
-        .and_then(build_config)
-        .map_err(with_config_hint)
-}
-
 fn load_env_config(
     get: &dyn Fn(&str) -> Option<String>,
     provider_hint: Option<String>,
