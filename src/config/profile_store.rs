@@ -121,17 +121,6 @@ impl ProfileStore {
         default_store_path()
     }
 
-    pub fn open_default() -> Result<Self> {
-        Self::open_with_options(ProfileStoreOpenOptions::default())
-    }
-
-    pub fn open(path: Option<PathBuf>) -> Result<Self> {
-        Self::open_with_options(ProfileStoreOpenOptions {
-            path,
-            ..ProfileStoreOpenOptions::default()
-        })
-    }
-
     pub fn open_with_password(
         path: Option<PathBuf>,
         master_password: Option<SecretString>,
@@ -350,15 +339,6 @@ impl ProfileStore {
         self.persist()
     }
 
-    /// Re-derive encryption key (for key rotation or master password change)
-    pub fn set_encryption(&mut self, master_password: Option<SecretString>) -> Result<()> {
-        let password = resolve_master_password(master_password, &self.path);
-        let salt = generate_salt();
-        let key = derive_master_key(&password, &salt)?;
-        self.encryption = EncryptionMetadata::new(key, salt.to_vec());
-        self.persist()
-    }
-
     fn persist(&mut self) -> Result<()> {
         let mut payload = self.file.clone();
         payload.normalize_default();
@@ -389,7 +369,7 @@ impl ProfileStore {
         write_atomic(&self.path, serialized.as_bytes())?;
 
         // Synchronize salt file to ensure it matches the in-memory state
-        // This is critical for operations like set_encryption() that generate a new salt
+        // This is critical for operations that regenerate the encryption metadata
         let salt_path = Self::salt_file_path(&self.path);
         Self::write_salt_file(&salt_path, salt)?;
 

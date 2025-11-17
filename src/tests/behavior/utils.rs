@@ -1,3 +1,5 @@
+use crate::error::Result;
+use crate::storage::StorageClient;
 use assert_cmd::prelude::*;
 use libtest_mimic::{Failed, Trial};
 use opendal::Operator;
@@ -7,8 +9,6 @@ use std::env;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::LazyLock;
-use storify::error::Result;
-use storify::storage::StorageClient;
 use uuid::Uuid;
 
 const TEST_DEFAULT_BUCKET: &str = "test";
@@ -25,7 +25,7 @@ pub static TEST_RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
 });
 
 // Cache MinIO config for tests to avoid repeated env reads
-static TEST_MINIO_CONFIG: LazyLock<storify::storage::StorageConfig> =
+static TEST_MINIO_CONFIG: LazyLock<crate::storage::StorageConfig> =
     LazyLock::new(|| build_minio_config_from_env().expect("minio config"));
 
 pub async fn init_test_service() -> Result<StorageClient> {
@@ -38,15 +38,16 @@ pub async fn init_test_service() -> Result<StorageClient> {
     Ok(client)
 }
 
-/// Get the absolute path to a file under `tests/data/`.
-pub fn get_test_data_path(file_name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("data")
-        .join(file_name)
+/// Write `content` to a unique temp file and return its path.
+pub fn write_temp_file(content: &[u8], suffix: &str) -> PathBuf {
+    let dir = env::temp_dir().join("storify-tests");
+    std::fs::create_dir_all(&dir).expect("create temp test dir");
+    let path = dir.join(format!("{}{}", Uuid::new_v4(), suffix));
+    std::fs::write(&path, content).expect("write temp test file");
+    path
 }
 
-fn build_minio_config_from_env() -> Result<storify::storage::StorageConfig> {
+fn build_minio_config_from_env() -> Result<crate::storage::StorageConfig> {
     let bucket = env::var("STORAGE_BUCKET").unwrap_or_else(|_| TEST_DEFAULT_BUCKET.to_string());
     let access_key_id = env::var("STORAGE_ACCESS_KEY_ID")
         .unwrap_or_else(|_| TEST_DEFAULT_ACCESS_KEY_ID.to_string());
@@ -59,7 +60,7 @@ fn build_minio_config_from_env() -> Result<storify::storage::StorageConfig> {
         .ok()
         .unwrap_or_else(|| TEST_DEFAULT_ENDPOINT.to_string());
 
-    let mut config = storify::storage::StorageConfig::s3(bucket);
+    let mut config = crate::storage::StorageConfig::s3(bucket);
     config.access_key_id = Some(access_key_id);
     config.access_key_secret = Some(access_key_secret);
     config.region = Some(region);
@@ -71,7 +72,7 @@ fn build_minio_config_from_env() -> Result<storify::storage::StorageConfig> {
 /// Apply MinIO config to a command as environment variables
 fn apply_minio_env<'a>(
     cmd: &'a mut Command,
-    cfg: &storify::storage::StorageConfig,
+    cfg: &crate::storage::StorageConfig,
 ) -> &'a mut Command {
     cmd.env("STORAGE_PROVIDER", "minio")
         .env("STORAGE_BUCKET", &cfg.bucket)
@@ -99,9 +100,25 @@ fn apply_minio_env<'a>(
 
 /// Create a base storify Command with clean environment and logging configured
 fn base_cmd() -> Command {
-    let mut cmd = Command::cargo_bin("storify").unwrap();
+    let mut cmd = match Command::cargo_bin("storify") {
+        Ok(cmd) => cmd,
+        Err(_) => {
+            build_storify_binary();
+            Command::cargo_bin("storify").expect("storify binary should exist after build")
+        }
+    };
     cmd.env_clear().env("RUST_LOG", "info");
     cmd
+}
+
+fn build_storify_binary() {
+    let status = Command::new("cargo")
+        .args(["build", "--bin", "storify"])
+        .status()
+        .expect("failed to invoke cargo build for storify binary");
+    if !status.success() {
+        panic!("cargo build --bin storify failed with status {status}");
+    }
 }
 
 /// Ensure the target bucket exists for tests. Ignores 'already exists' errors.
@@ -109,7 +126,7 @@ pub async fn ensure_bucket_exists(op: &Operator) -> Result<()> {
     match op.create_dir("").await {
         Ok(_) => Ok(()),
         Err(e) if e.kind() == opendal::ErrorKind::Unexpected => Ok(()),
-        Err(e) => Err(storify::error::Error::from(e)),
+        Err(e) => Err(crate::error::Error::from(e)),
     }
 }
 
@@ -130,10 +147,6 @@ impl Fixture {
         Self {
             paths: std::sync::Mutex::new(vec![]),
         }
-    }
-
-    pub fn add_path(&self, path: String) {
-        self.paths.lock().unwrap().push(path);
     }
 
     pub fn new_dir_path(&self) -> String {
@@ -190,7 +203,7 @@ impl Default for Fixture {
 
 /// A helper struct for managing End-to-End test environments.
 pub struct E2eTestEnv {
-    pub config: storify::storage::StorageConfig,
+    pub config: crate::storage::StorageConfig,
     pub verifier: StorageClient,
 }
 
