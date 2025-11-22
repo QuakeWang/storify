@@ -101,40 +101,23 @@ impl Appender for OpenDalAppender {
                 Some(ref m2) => {
                     let etag1 = meta.etag();
                     let etag2 = m2.etag();
+                    let local_bytes = tokio::fs::read(local).await?;
                     if etag1.is_some() && etag2.is_some() {
                         if etag1 != etag2 {
                             return Err(Error::InvalidArgument { message: "Remote object changed during read (ETag mismatch after read), append aborted.".into() });
                         }
                         let mut merged = buf;
-                        merged.extend_from_slice(&tokio::fs::read(local).await?);
-                        if etag1.is_some() && etag2.is_some() {
-                            if etag1 != etag2 {
-                                return Err(Error::InvalidArgument { message: "Remote object changed during read (ETag mismatch after read), append aborted.".into() });
-                            }
-                            (merged, etag2.map(|s| s.to_owned()), None)
-                        } else {
-                            let s1 = meta.content_length();
-                            let s2 = m2.content_length();
-                            if s1 != s2
-                                || s2
-                                    != merged.len() as u64
-                                        - tokio::fs::read(local).await?.len() as u64
-                            {
-                                return Err(Error::InvalidArgument { message: "Remote object changed during read (size or byte count mismatch after read), append aborted.".into() });
-                            }
-                            (
-                                merged,
-                                None,
-                                Some(s2 + tokio::fs::read(local).await?.len() as u64),
-                            )
-                        }
+                        merged.extend_from_slice(&local_bytes);
+                        (merged, etag2.map(|s| s.to_owned()), None)
                     } else {
                         let s1 = meta.content_length();
                         let s2 = m2.content_length();
                         if s1 != s2 || s2 != buf.len() as u64 {
                             return Err(Error::InvalidArgument { message: "Remote object changed during read (size or byte count mismatch after read), append aborted.".into() });
                         }
-                        (buf, None, Some(s2))
+                        let mut merged = buf;
+                        merged.extend_from_slice(&local_bytes);
+                        (merged, None, Some(s2))
                     }
                 }
                 None => {
@@ -144,8 +127,7 @@ impl Appender for OpenDalAppender {
                 }
             }
         } else {
-            let src = tokio::fs::read(local).await?;
-            let merged = src;
+            let local_bytes = tokio::fs::read(local).await?;
             let meta2 = self.stat_remote(remote).await?;
             if let Some(ref m2) = meta2 {
                 let mut remote_buf = self.operator.read(remote).await?.to_vec();
@@ -158,7 +140,7 @@ impl Appender for OpenDalAppender {
                             if etag2 != etag3 {
                                 return Err(Error::InvalidArgument { message: "Remote object changed during concurrent creation (ETag mismatch), append aborted.".into() });
                             }
-                            remote_buf.extend_from_slice(&tokio::fs::read(local).await?);
+                            remote_buf.extend_from_slice(&local_bytes);
                             (remote_buf, etag3.map(|s| s.to_owned()), None)
                         } else {
                             let s2 = m2.content_length();
@@ -166,7 +148,7 @@ impl Appender for OpenDalAppender {
                             if s2 != s3 || s3 != remote_buf.len() as u64 {
                                 return Err(Error::InvalidArgument { message: "Remote object changed during concurrent creation (size or byte count mismatch), append aborted.".into() });
                             }
-                            remote_buf.extend_from_slice(&tokio::fs::read(local).await?);
+                            remote_buf.extend_from_slice(&local_bytes);
                             (remote_buf, None, Some(s3))
                         }
                     }
@@ -175,7 +157,7 @@ impl Appender for OpenDalAppender {
                     }
                 }
             } else {
-                (merged, None, None)
+                (local_bytes, None, None)
             }
         };
 
@@ -239,26 +221,16 @@ impl Appender for OpenDalAppender {
                         }
                         let mut merged = buf;
                         merged.extend_from_slice(&new_data);
-                        if etag1.is_some() && etag2.is_some() {
-                            if etag1 != etag2 {
-                                return Err(Error::InvalidArgument { message: "Remote object changed during read (ETag mismatch after read), append aborted.".into() });
-                            }
-                            (merged, etag2.map(|s| s.to_owned()), None)
-                        } else {
-                            let s1 = meta0.content_length();
-                            let s2 = m2.content_length();
-                            if s1 != s2 || s2 != merged.len() as u64 - new_data.len() as u64 {
-                                return Err(Error::InvalidArgument { message: "Remote object changed during read (size or byte count mismatch after read), append aborted.".into() });
-                            }
-                            (merged, None, Some(s2 + new_data.len() as u64))
-                        }
+                        (merged, etag2.map(|s| s.to_owned()), None)
                     } else {
                         let s1 = meta0.content_length();
                         let s2 = m2.content_length();
                         if s1 != s2 || s2 != buf.len() as u64 {
                             return Err(Error::InvalidArgument { message: "Remote object changed during read (size or byte count mismatch after read), append aborted.".into() });
                         }
-                        (buf, None, Some(s2))
+                        let mut merged = buf;
+                        merged.extend_from_slice(&new_data);
+                        (merged, None, Some(s2))
                     }
                 }
                 None => {
@@ -268,7 +240,6 @@ impl Appender for OpenDalAppender {
                 }
             }
         } else {
-            let merged = new_data.clone();
             let meta2 = self.stat_remote(remote).await?;
             if let Some(ref m2) = meta2 {
                 let mut remote_buf = self.operator.read(remote).await?.to_vec();
@@ -281,7 +252,7 @@ impl Appender for OpenDalAppender {
                             if etag2 != etag3 {
                                 return Err(Error::InvalidArgument { message: "Remote object changed during concurrent creation (ETag mismatch), append aborted.".into() });
                             }
-                            remote_buf.extend_from_slice(&merged);
+                            remote_buf.extend_from_slice(&new_data);
                             (remote_buf, etag3.map(|s| s.to_owned()), None)
                         } else {
                             let s2 = m2.content_length();
@@ -289,7 +260,7 @@ impl Appender for OpenDalAppender {
                             if s2 != s3 || s3 != remote_buf.len() as u64 {
                                 return Err(Error::InvalidArgument { message: "Remote object changed during concurrent creation (size or byte count mismatch), append aborted.".into() });
                             }
-                            remote_buf.extend_from_slice(&merged);
+                            remote_buf.extend_from_slice(&new_data);
                             (remote_buf, None, Some(s3))
                         }
                     }
@@ -298,7 +269,7 @@ impl Appender for OpenDalAppender {
                     }
                 }
             } else {
-                (merged, None, None)
+                (new_data, None, None)
             }
         };
 
