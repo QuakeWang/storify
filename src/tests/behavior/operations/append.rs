@@ -1,28 +1,29 @@
-use crate::*;
+use crate::async_trials;
+use crate::error::Result;
+use crate::storage::StorageClient;
+use crate::tests::behavior::*;
 use assert_cmd::prelude::*;
 use predicates::prelude::*;
-use storify::error::Result;
-use storify::storage::StorageClient;
+use std::io::Write;
+use std::process::Stdio;
 use tokio::fs;
+use uuid::Uuid;
 
-pub fn tests(client: &StorageClient, tests: &mut Vec<Trial>) {
-    tests.extend(async_trials!(
-        client,
-        test_append_from_local_creates_when_missing,
-        test_append_from_local_appends_existing,
-        test_append_no_create_fails,
-        test_append_from_stdin_creates_when_missing,
-        test_append_from_stdin_appends_existing,
-        test_append_alias_positional_creates_when_missing,
-        test_append_alias_positional_appends_existing
-    ));
-}
+register_behavior_tests!(
+    test_append_from_local_creates_when_missing,
+    test_append_from_local_appends_existing,
+    test_append_no_create_fails,
+    test_append_from_stdin_creates_when_missing,
+    test_append_from_stdin_appends_existing,
+    test_append_alias_positional_creates_when_missing,
+    test_append_alias_positional_appends_existing,
+);
 
 async fn test_append_from_local_creates_when_missing(_client: StorageClient) -> Result<()> {
     let env = E2eTestEnv::new().await;
 
     let dest_path = TEST_FIXTURE.new_file_path();
-    let local_path = std::env::temp_dir().join(format!("{}-append.txt", uuid::Uuid::new_v4()));
+    let local_path = std::env::temp_dir().join(format!("{}-append.txt", Uuid::new_v4()));
     let content = b"hello";
     fs::write(&local_path, content).await?;
 
@@ -49,7 +50,7 @@ async fn test_append_from_local_appends_existing(_client: StorageClient) -> Resu
         .write(&dest_path, initial.clone())
         .await?;
 
-    let local_path = std::env::temp_dir().join(format!("{}-append2.txt", uuid::Uuid::new_v4()));
+    let local_path = std::env::temp_dir().join(format!("{}-append2.txt", Uuid::new_v4()));
     let appended = b"tail".to_vec();
     fs::write(&local_path, &appended).await?;
 
@@ -72,7 +73,7 @@ async fn test_append_no_create_fails(_client: StorageClient) -> Result<()> {
     let env = E2eTestEnv::new().await;
     let dest_path = TEST_FIXTURE.new_file_path();
 
-    let local_path = std::env::temp_dir().join(format!("{}-append3.txt", uuid::Uuid::new_v4()));
+    let local_path = std::env::temp_dir().join(format!("{}-append3.txt", Uuid::new_v4()));
     fs::write(&local_path, b"data").await?;
 
     env.command()
@@ -100,8 +101,7 @@ async fn test_append_from_stdin_creates_when_missing(_client: StorageClient) -> 
     let mut cmd = env.command();
     cmd.arg("append").arg(&dest_path).arg("--stdin");
 
-    use std::io::Write;
-    let mut child = cmd.stdin(std::process::Stdio::piped()).spawn().unwrap();
+    let mut child = cmd.stdin(Stdio::piped()).spawn().unwrap();
     {
         let stdin = child.stdin.as_mut().unwrap();
         stdin.write_all(content).unwrap();
@@ -133,8 +133,7 @@ async fn test_append_from_stdin_appends_existing(_client: StorageClient) -> Resu
     let mut cmd = env.command();
     cmd.arg("append").arg(&dest_path).arg("--stdin");
 
-    use std::io::Write;
-    let mut child = cmd.stdin(std::process::Stdio::piped()).spawn().unwrap();
+    let mut child = cmd.stdin(Stdio::piped()).spawn().unwrap();
     {
         let stdin = child.stdin.as_mut().unwrap();
         stdin.write_all(&appended).unwrap();
@@ -157,7 +156,7 @@ async fn test_append_alias_positional_creates_when_missing(_client: StorageClien
     let env = E2eTestEnv::new().await;
 
     let dest_path = TEST_FIXTURE.new_file_path();
-    let local_path = std::env::temp_dir().join(format!("{}-append-pos1.txt", uuid::Uuid::new_v4()));
+    let local_path = std::env::temp_dir().join(format!("{}-append-pos1.txt", Uuid::new_v4()));
     let content = b"alias-create";
     fs::write(&local_path, content).await?;
 
@@ -183,7 +182,7 @@ async fn test_append_alias_positional_appends_existing(_client: StorageClient) -
         .write(&dest_path, initial.clone())
         .await?;
 
-    let local_path = std::env::temp_dir().join(format!("{}-append-pos2.txt", uuid::Uuid::new_v4()));
+    let local_path = std::env::temp_dir().join(format!("{}-append-pos2.txt", Uuid::new_v4()));
     let appended = b"alias-append".to_vec();
     fs::write(&local_path, &appended).await?;
 
