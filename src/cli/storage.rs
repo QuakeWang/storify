@@ -296,6 +296,36 @@ pub struct TouchArgs {
     pub parents: bool,
 }
 
+#[derive(ClapArgs, Debug, Clone)]
+#[command(group = clap::ArgGroup::new("stdin_or_src").args(["stdin", "src"]).multiple(false))]
+pub struct AppendArgs {
+    /// Remote destination file path
+    #[arg(value_name = "DEST", value_parser = parse_validated_path)]
+    pub dest: String,
+
+    /// Optional positional when using the alias form: `append <SRC> <DEST>`
+    /// When --stdin/--src are both absent and this is provided, CLI treats:
+    ///   dest (first positional) as local SRC, and alt_dest as remote DEST.
+    #[arg(value_name = "ALT_DEST", required = false, value_parser = parse_validated_path)]
+    pub alt_dest: Option<String>,
+
+    /// Local source file to append (mutually exclusive with --stdin)
+    #[arg(long = "src", value_name = "SRC")]
+    pub src: Option<String>,
+
+    /// Read content from standard input
+    #[arg(long)]
+    pub stdin: bool,
+
+    /// Do not create the file if it doesn't exist
+    #[arg(short = 'c', long = "no-create")]
+    pub no_create: bool,
+
+    /// Create parent directories when needed (filesystem providers)
+    #[arg(short = 'p', long = "parents")]
+    pub parents: bool,
+}
+
 pub async fn execute(command: &Command, ctx: &CliContext) -> Result<()> {
     let config = ctx.storage_config()?;
     let client = StorageClient::new(config.clone()).await?;
@@ -451,6 +481,54 @@ pub async fn execute(command: &Command, ctx: &CliContext) -> Result<()> {
                     touch_args.parents,
                 )
                 .await?;
+        }
+        Command::Append(append_args) => {
+            if append_args.stdin {
+                if append_args.alt_dest.is_some() {
+                    return Err(Error::InvalidArgument {
+                        message: "Too many positionals: use `append <DEST> --stdin`".to_string(),
+                    });
+                }
+                let opts = crate::storage::AppendOptions {
+                    no_create: append_args.no_create,
+                    parents: append_args.parents,
+                };
+                client.append_from_stdin(&append_args.dest, opts).await?;
+            } else {
+                // Two supported forms (mutually exclusive with --stdin):
+                // 1) append <DEST> --src <SRC>         (canonical)
+                // 2) append <SRC> <DEST>                (alias)
+                if let Some(src_flag) = append_args.src.as_ref() {
+                    if append_args.alt_dest.is_some() {
+                        return Err(Error::InvalidArgument {
+                            message: "Too many positionals: use `append <DEST> --src <SRC>`"
+                                .to_string(),
+                        });
+                    }
+                    let opts = crate::storage::AppendOptions {
+                        no_create: append_args.no_create,
+                        parents: append_args.parents,
+                    };
+                    client
+                        .append_from_local(src_flag, &append_args.dest, opts)
+                        .await?;
+                } else if let Some(dest2) = append_args.alt_dest.as_ref() {
+                    // Alias: first positional is LOCAL, second is DEST
+                    let local_src = &append_args.dest;
+                    let remote_dest = dest2;
+                    let opts = crate::storage::AppendOptions {
+                        no_create: append_args.no_create,
+                        parents: append_args.parents,
+                    };
+                    client
+                        .append_from_local(local_src, remote_dest, opts)
+                        .await?;
+                } else {
+                    return Err(Error::InvalidArgument {
+                        message: "missing SRC: use `append <DEST> --src <SRC>` or alias `append <SRC> <DEST>`".to_string(),
+                    });
+                }
+            }
         }
         Command::Config(_) => {
             unreachable!("Config commands are handled separately")
