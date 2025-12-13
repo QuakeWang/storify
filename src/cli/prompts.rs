@@ -78,6 +78,8 @@ impl Prompt {
     }
 }
 
+// Default is auto-derived above.
+
 fn join_error(err: task::JoinError) -> Error {
     Error::Io {
         source: io::Error::other(err.to_string()),

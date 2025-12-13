@@ -52,6 +52,7 @@ fn run_behavior_with_args(args: Arguments) -> Result<()> {
     operations::tree::tests(&client, &mut tests);
     operations::diff::tests(&client, &mut tests);
     operations::touch::tests(&client, &mut tests);
+    operations::append::tests(&client, &mut tests);
 
     let _ = tracing_subscriber::fmt()
         .pretty()
