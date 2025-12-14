@@ -47,7 +47,6 @@ This page lists the common Storify CLI commands with short, copy-pastable exampl
 - Alias form (local first, remote second): `storify append ./local.txt remote/path`
 - Require existing file: add `-c/--no-create`
 - Auto-create parent directories (filesystem providers): add `-p/--parents`
-- Guard against huge files or force append: `storify append remote/path --src ./large.bin -s 50 -f`
 
 ## Options cheat sheet
 - `-R`: recursive (works with `ls`, `put`, `rm`, `find`)
