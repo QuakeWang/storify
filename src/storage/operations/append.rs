@@ -192,13 +192,11 @@ impl Appender for OpenDalAppender {
                     });
                 }
             }
-        } else {
-            if self.stat_remote(remote).await?.is_some() {
-                return Err(Error::InvalidArgument {
-                    message: "Remote object was concurrently created before append, operation aborted."
-                        .into(),
-                });
-            }
+        } else if self.stat_remote(remote).await?.is_some() {
+            return Err(Error::InvalidArgument {
+                message: "Remote object was concurrently created before append, operation aborted."
+                    .into(),
+            });
         }
         self.write_remote(remote, merged, opts.parents).await
     }
@@ -311,13 +309,11 @@ impl Appender for OpenDalAppender {
                     });
                 }
             }
-        } else {
-            if self.stat_remote(remote).await?.is_some() {
-                return Err(Error::InvalidArgument {
-                    message: "Remote object was concurrently created before append, operation aborted."
-                        .into(),
-                });
-            }
+        } else if self.stat_remote(remote).await?.is_some() {
+            return Err(Error::InvalidArgument {
+                message: "Remote object was concurrently created before append, operation aborted."
+                    .into(),
+            });
         }
         self.write_remote(remote, merged, opts.parents).await
     }
