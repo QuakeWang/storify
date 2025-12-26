@@ -1,6 +1,12 @@
 # Configuration and Providers
 
-Storify supports two configuration styles: encrypted profiles and environment variables. Environment variables always win over stored profile values.
+Storify supports encrypted profiles and environment variables. It also supports an encrypted temporary config cache with a TTL.
+
+## Resolution order (highest to lowest)
+- `--profile <name>` (explicit profile selection)
+- temporary config cache (if set and not expired)
+- environment variables (`STORAGE_PROVIDER` + provider-specific variables)
+- default profile (from profile store)
 
 ## Profiles (recommended)
 - Create interactively: `storify config create myprofile`
@@ -32,6 +38,6 @@ Storify supports two configuration styles: encrypted profiles and environment va
 - COS, HDFS, Azblob: No (not supported)
 
 ## Security
-- Profile store is encrypted with AES-256-GCM.
+- Profile store is encrypted with ChaCha20Poly1305 (field-level encryption).
 - On Unix, profile store permissions are set to 0600.
 - Writes are atomic; a `.bak` backup is created before modifying the store.

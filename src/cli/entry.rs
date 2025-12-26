@@ -98,13 +98,16 @@ pub enum ConfigCommand {
     /// Show configuration information
     Show(ShowArgs),
     /// Create or update a profile in the profile store
-    Create(CreateArgs),
+    Create(Box<CreateArgs>),
     /// Mutate configuration settings (e.g. default profile)
     Set(SetArgs),
     /// List profiles in the profile store
     List(ListArgs),
     /// Delete a profile from the profile store
     Delete(DeleteArgs),
+    /// Manage temporary config cache (encrypted, TTL-based)
+    #[command(subcommand)]
+    Temp(TempCommand),
 }
 
 #[derive(ClapArgs, Debug, Clone)]
@@ -159,6 +162,36 @@ pub struct CreateArgs {
     /// Mark the profile as default after creation
     #[arg(long = "make-default")]
     pub make_default: bool,
+
+    /// Save as temporary config cache instead of a named profile
+    #[arg(long)]
+    pub temp: bool,
+
+    /// Time-to-live for temporary cache (e.g. 30m, 24h, 7d). Default: 24h
+    #[arg(long, default_value = "24h")]
+    pub ttl: String,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum TempCommand {
+    /// Show temporary config cache (if present and not expired)
+    Show(TempShowArgs),
+    /// Clear temporary config cache
+    Clear(TempClearArgs),
+}
+
+#[derive(ClapArgs, Debug, Clone)]
+pub struct TempShowArgs {
+    /// Show secrets in plaintext (access_key_id, access_key_secret). Default: redacted
+    #[arg(long)]
+    pub show_secrets: bool,
+}
+
+#[derive(ClapArgs, Debug, Clone)]
+pub struct TempClearArgs {
+    /// Skip confirmation prompt
+    #[arg(long)]
+    pub force: bool,
 }
 
 #[derive(ClapArgs, Debug, Clone)]

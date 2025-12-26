@@ -17,6 +17,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 #[cfg(unix)]
@@ -86,6 +87,15 @@ struct ProfileStoreFile {
     default: Option<String>,
     #[serde(default)]
     profiles: BTreeMap<String, StoredProfile>,
+    #[serde(default)]
+    temp: Option<TempProfileEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TempProfileEntry {
+    created_at_unix: u64,
+    expires_at_unix: u64,
+    profile: StoredProfile,
 }
 
 impl ProfileStoreFile {
@@ -98,6 +108,15 @@ impl ProfileStoreFile {
 
         if should_clear {
             self.default = None;
+        }
+    }
+
+    fn normalize_temp(&mut self) {
+        let now = now_unix();
+        if let Some(t) = &self.temp
+            && t.expires_at_unix <= now
+        {
+            self.temp = None;
         }
     }
 }
@@ -297,6 +316,44 @@ impl ProfileStore {
         self.file.default.as_deref()
     }
 
+    pub fn temp_profile(&self) -> Option<&StoredProfile> {
+        let now = now_unix();
+        self.file
+            .temp
+            .as_ref()
+            .filter(|t| t.expires_at_unix > now)
+            .map(|t| &t.profile)
+    }
+
+    pub fn temp_expires_at_unix(&self) -> Option<u64> {
+        let now = now_unix();
+        self.file
+            .temp
+            .as_ref()
+            .filter(|t| t.expires_at_unix > now)
+            .map(|t| t.expires_at_unix)
+    }
+
+    pub fn set_temp_profile(&mut self, profile: StoredProfile, ttl: Duration) -> Result<()> {
+        let now = now_unix();
+        let expires_at_unix = now.saturating_add(ttl.as_secs().max(1));
+        self.file.temp = Some(TempProfileEntry {
+            created_at_unix: now,
+            expires_at_unix,
+            profile,
+        });
+        self.persist()
+    }
+
+    pub fn clear_temp_profile(&mut self) -> Result<bool> {
+        if self.file.temp.is_none() {
+            return Ok(false);
+        }
+        self.file.temp = None;
+        self.persist()?;
+        Ok(true)
+    }
+
     pub fn save_profile(
         &mut self,
         name: String,
@@ -342,11 +399,15 @@ impl ProfileStore {
     fn persist(&mut self) -> Result<()> {
         let mut payload = self.file.clone();
         payload.normalize_default();
+        payload.normalize_temp();
 
         let key = self.encryption.key();
         let salt = self.encryption.salt();
 
         encrypt_all_profiles(&mut payload.profiles, key)?;
+        if let Some(t) = payload.temp.as_mut() {
+            encrypt_profile_secrets(&mut t.profile, key)?;
+        }
 
         let serialized =
             toml::to_string_pretty(&payload).map_err(|source| Error::ProfileStoreSerialize {
@@ -413,11 +474,14 @@ impl ProfileStore {
         let key = derive_master_key(&password, &salt)?;
 
         for profile in file.profiles.values_mut() {
-            decrypt_sensitive_field(&mut profile.access_key_id, &key)?;
-            decrypt_sensitive_field(&mut profile.access_key_secret, &key)?;
+            decrypt_profile_secrets(profile, &key)?;
+        }
+        if let Some(t) = file.temp.as_mut() {
+            decrypt_profile_secrets(&mut t.profile, &key)?;
         }
 
         file.normalize_default();
+        file.normalize_temp();
         let metadata = EncryptionMetadata::new(key, salt);
         Ok((file, metadata))
     }
@@ -438,21 +502,28 @@ fn encrypt_all_profiles(
     key: &[u8; 32],
 ) -> Result<()> {
     for profile in profiles.values_mut() {
-        // Encrypt access_key_id
-        if let Some(value) = &profile.access_key_id {
-            profile.access_key_id = Some(encrypt_field(value, key)?);
-        }
-
-        // Encrypt access_key_secret
-        if let Some(value) = &profile.access_key_secret {
-            profile.access_key_secret = Some(encrypt_field(value, key)?);
-        }
+        encrypt_profile_secrets(profile, key)?;
     }
 
     Ok(())
 }
 
-/// Decrypt sensitive field
+fn encrypt_profile_secrets(profile: &mut StoredProfile, key: &[u8; 32]) -> Result<()> {
+    if let Some(value) = profile.access_key_id.as_deref() {
+        profile.access_key_id = Some(encrypt_field(value, key)?);
+    }
+    if let Some(value) = profile.access_key_secret.as_deref() {
+        profile.access_key_secret = Some(encrypt_field(value, key)?);
+    }
+    Ok(())
+}
+
+fn decrypt_profile_secrets(profile: &mut StoredProfile, key: &[u8; 32]) -> Result<()> {
+    decrypt_sensitive_field(&mut profile.access_key_id, key)?;
+    decrypt_sensitive_field(&mut profile.access_key_secret, key)?;
+    Ok(())
+}
+
 fn decrypt_sensitive_field(field: &mut Option<String>, key: &[u8; 32]) -> Result<()> {
     if let Some(encrypted) = field.as_mut()
         && let Some(decrypted) = decrypt_field(encrypted, key)?
@@ -460,6 +531,13 @@ fn decrypt_sensitive_field(field: &mut Option<String>, key: &[u8; 32]) -> Result
         *encrypted = decrypted;
     }
     Ok(())
+}
+
+fn now_unix() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_else(|_| Duration::from_secs(0))
+        .as_secs()
 }
 
 /// RAII guard for temporary files (auto-cleanup on drop)
@@ -605,4 +683,71 @@ fn backup_path(path: &Path) -> PathBuf {
         .and_then(|s| s.to_str())
         .unwrap_or("profiles.toml");
     path.with_file_name(format!("{file_name}.bak"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use secrecy::SecretString;
+
+    fn test_password() -> SecretString {
+        SecretString::new("test-password".into())
+    }
+
+    fn test_config(provider: StorageProvider, bucket: &str) -> StorageConfig {
+        match provider {
+            StorageProvider::Oss => StorageConfig::oss(bucket.to_string()),
+            StorageProvider::S3 => StorageConfig::s3(bucket.to_string()),
+            StorageProvider::Cos => StorageConfig::cos(bucket.to_string()),
+            StorageProvider::Fs => StorageConfig::fs(Some("./tmp".to_string())),
+            StorageProvider::Hdfs => {
+                StorageConfig::hdfs(Some("nn".to_string()), Some("/".to_string()))
+            }
+            StorageProvider::Azblob => StorageConfig::azblob(bucket.to_string()),
+        }
+    }
+
+    #[test]
+    fn temp_profile_roundtrip_and_expiry_check() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("profiles.toml");
+
+        let mut store =
+            ProfileStore::open_with_password(Some(path.clone()), Some(test_password())).unwrap();
+
+        let mut cfg = test_config(StorageProvider::Oss, "b1");
+        cfg.access_key_id = Some("id".to_string());
+        cfg.access_key_secret = Some("secret".to_string());
+        let stored = StoredProfile::from_config(&cfg);
+
+        store
+            .set_temp_profile(stored.clone(), Duration::from_secs(3600))
+            .unwrap();
+
+        let temp = store.temp_profile().expect("temp profile");
+        assert_eq!(temp.provider, stored.provider);
+        assert_eq!(temp.bucket, stored.bucket);
+
+        // Force expiry without waiting.
+        store.file.temp.as_mut().unwrap().expires_at_unix = now_unix().saturating_sub(1);
+        assert!(store.temp_profile().is_none());
+    }
+
+    #[test]
+    fn clear_temp_profile_removes_entry() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("profiles.toml");
+        let mut store =
+            ProfileStore::open_with_password(Some(path.clone()), Some(test_password())).unwrap();
+
+        let cfg = test_config(StorageProvider::S3, "b2");
+        store
+            .set_temp_profile(StoredProfile::from_config(&cfg), Duration::from_secs(3600))
+            .unwrap();
+        assert!(store.temp_profile().is_some());
+
+        assert!(store.clear_temp_profile().unwrap());
+        assert!(store.temp_profile().is_none());
+        assert!(!store.clear_temp_profile().unwrap());
+    }
 }

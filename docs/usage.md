@@ -47,3 +47,13 @@ This page lists the common Storify CLI commands with short, copy-pastable exampl
 - `-d`: tree depth
 - `-f`: force (skip confirmations where applicable)
 - `--json` / `--raw`: structured output for `stat`
+
+## Temporary config cache
+Use an encrypted, TTL-based temporary cache to switch providers quickly without creating a named profile:
+
+- Set temporary config (default TTL 24h): `storify config create --temp --provider cos --bucket my-bucket --access-key-id ... --access-key-secret ...`
+- Override TTL: `storify config create --temp --ttl 4h --provider s3 --bucket my-bucket`
+- Show current temp: `storify config temp show`
+- Clear temp: `storify config temp clear`
+
+`--profile <name>` always overrides the temporary cache for a single command.
