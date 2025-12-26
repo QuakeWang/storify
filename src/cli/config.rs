@@ -5,14 +5,17 @@ use crate::config::{
     spec::{ProviderSpec, Requirement, provider_spec},
 };
 use crate::error::{Error, Result};
-use std::env;
 use std::str::FromStr;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::runtime::Handle;
 use tokio::task;
 
 use super::{
     context::CliContext,
-    entry::{ConfigCommand, CreateArgs, DeleteArgs, ListArgs, SetArgs, ShowArgs},
+    entry::{
+        ConfigCommand, CreateArgs, DeleteArgs, ListArgs, SetArgs, ShowArgs, TempClearArgs,
+        TempCommand, TempShowArgs,
+    },
     prompts::Prompt,
 };
 
@@ -84,6 +87,7 @@ pub fn execute(command: &ConfigCommand, ctx: &CliContext) -> Result<()> {
         ConfigCommand::Set(args) => set_default_profile(args, ctx),
         ConfigCommand::List(args) => list_profiles(args, ctx),
         ConfigCommand::Delete(args) => delete_profile(args, ctx),
+        ConfigCommand::Temp(cmd) => temp_command(cmd, ctx),
     }
 }
 
@@ -124,8 +128,6 @@ fn show_command(args: &ShowArgs, ctx: &CliContext) -> Result<()> {
 }
 
 fn build_source_hint(source: Option<ConfigSource>, resolved: &ResolvedConfig) -> Option<String> {
-    let has_env_provider = env::var("STORAGE_PROVIDER").is_ok();
-
     match source {
         Some(ConfigSource::ExplicitProfile) => {
             let profile = resolved.profile.as_deref().unwrap_or("unknown");
@@ -133,50 +135,78 @@ fn build_source_hint(source: Option<ConfigSource>, resolved: &ResolvedConfig) ->
         }
         Some(ConfigSource::DefaultProfile) => {
             let profile = resolved.profile.as_deref().unwrap_or("unknown");
-            let mut hint = format!("default profile '{}'", profile);
-
-            if has_env_provider {
-                hint.push_str("\n# (overriding STORAGE_PROVIDER environment variable)");
-                hint.push_str("\n# Tip: Run 'config set --clear' to use environment variables");
-            }
-
-            Some(hint)
+            Some(format!("default profile '{}'", profile))
         }
         Some(ConfigSource::Environment) => Some("environment variables".to_string()),
+        Some(ConfigSource::TempCache) => {
+            let mut hint = "temporary config cache".to_string();
+            if let Some(expires_at) = resolved.temp_expires_at_unix {
+                hint.push_str(&format!(" (expires {})", format_expires_hint(expires_at)));
+            }
+            Some(hint)
+        }
         None => None,
     }
+}
+
+fn format_expires_hint(expires_at_unix: u64) -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_else(|_| Duration::from_secs(0))
+        .as_secs();
+    if expires_at_unix <= now {
+        return "now".to_string();
+    }
+    let remain = expires_at_unix - now;
+    if remain < 60 {
+        return format!("in {}s", remain);
+    }
+    if remain < 60 * 60 {
+        return format!("in {}m", remain / 60);
+    }
+    if remain < 24 * 60 * 60 {
+        return format!("in {}h", remain / 3600);
+    }
+    format!("in {}d", remain / (24 * 3600))
 }
 
 fn create_profile(args: &CreateArgs, ctx: &CliContext) -> Result<()> {
     let mut store = open_profile_store(ctx)?;
     let mut session = PromptSession::new();
 
-    let mut name = match &args.name {
-        Some(name) => name.clone(),
-        None => {
-            println!("Enter a name for this profile.");
-            session.input_required(ctx, "Profile name", false)?
+    let temp_mode = args.temp;
+    let name = if temp_mode {
+        args.name.clone().unwrap_or_else(|| "temp".to_string())
+    } else {
+        let mut name = match &args.name {
+            Some(name) => name.clone(),
+            None => {
+                println!("Enter a name for this profile.");
+                session.input_required(ctx, "Profile name", false)?
+            }
+        };
+
+        if name.trim().is_empty() {
+            return Err(Error::InvalidArgument {
+                message: "Profile name cannot be empty.".into(),
+            });
         }
+        name = name.trim().to_string();
+
+        if store.profile(&name).is_some() && !args.force {
+            let overwrite = session.confirm(
+                ctx,
+                &format!("Profile '{}' exists. Overwrite?", name),
+                false,
+            )?;
+            if !overwrite {
+                println!("Operation cancelled.");
+                return Ok(());
+            }
+        }
+
+        name
     };
-
-    if name.trim().is_empty() {
-        return Err(Error::InvalidArgument {
-            message: "Profile name cannot be empty.".into(),
-        });
-    }
-    name = name.trim().to_string();
-
-    if store.profile(&name).is_some() && !args.force {
-        let overwrite = session.confirm(
-            ctx,
-            &format!("Profile '{}' exists. Overwrite?", name),
-            false,
-        )?;
-        if !overwrite {
-            println!("Operation cancelled.");
-            return Ok(());
-        }
-    }
 
     let provider_input = match &args.provider {
         Some(provider) => provider.clone(),
@@ -273,18 +303,116 @@ fn create_profile(args: &CreateArgs, ctx: &CliContext) -> Result<()> {
 
     prepare_storage_config(&mut config)?;
 
-    let mut make_default = args.make_default;
-    if !make_default && session.used {
-        make_default =
-            session.confirm(ctx, &format!("Set '{name}' as the default profile?"), false)?;
+    let stored = StoredProfile::from_config(&config);
+    if temp_mode {
+        let ttl = parse_ttl(&args.ttl)?;
+        store.set_temp_profile(stored, ttl)?;
+        println!("Temporary config cache saved to {}", store.path().display());
+        println!("Name hint: {}", name);
+        println!("TTL: {}", args.ttl);
+        println!("Tip: use `storify --profile <name>` to override temporary cache");
+    } else {
+        let mut make_default = args.make_default;
+        if !make_default && session.used {
+            make_default =
+                session.confirm(ctx, &format!("Set '{name}' as the default profile?"), false)?;
+        }
+
+        store.save_profile(name.clone(), stored, make_default)?;
+        println!("Profile '{}' saved to {}", name, store.path().display());
+        if make_default {
+            println!("'{}' marked as default.", name);
+        }
+    }
+    Ok(())
+}
+
+fn parse_ttl(input: &str) -> Result<std::time::Duration> {
+    let s = input.trim();
+    if s.is_empty() {
+        return Err(Error::InvalidArgument {
+            message: "ttl cannot be empty".to_string(),
+        });
+    }
+    if s.chars().all(|c| c.is_ascii_digit()) {
+        let secs: u64 = s.parse().map_err(|_| Error::InvalidArgument {
+            message: format!("invalid ttl: {s}"),
+        })?;
+        return Ok(std::time::Duration::from_secs(secs.max(1)));
+    }
+    let (num, unit) = s.split_at(s.len().saturating_sub(1));
+    let n: u64 = num.parse().map_err(|_| Error::InvalidArgument {
+        message: format!("invalid ttl: {s}"),
+    })?;
+    let secs = match unit {
+        "s" => n,
+        "m" => n.saturating_mul(60),
+        "h" => n.saturating_mul(60 * 60),
+        "d" => n.saturating_mul(24 * 60 * 60),
+        _ => {
+            return Err(Error::InvalidArgument {
+                message: format!("invalid ttl unit: {unit} (expected s|m|h|d)"),
+            });
+        }
+    };
+    Ok(std::time::Duration::from_secs(secs.max(1)))
+}
+
+fn temp_command(cmd: &TempCommand, ctx: &CliContext) -> Result<()> {
+    match cmd {
+        TempCommand::Show(args) => show_temp(args, ctx),
+        TempCommand::Clear(args) => clear_temp(args, ctx),
+    }
+}
+
+fn show_temp(args: &TempShowArgs, ctx: &CliContext) -> Result<()> {
+    let store = open_profile_store(ctx)?;
+    let Some(profile) = store.temp_profile() else {
+        println!("No temporary config cache set.");
+        return Ok(());
+    };
+
+    let credential_mode = if args.show_secrets {
+        CredentialMode::PlainText
+    } else {
+        CredentialMode::Redacted
+    };
+
+    if let Some(expires_at) = store.temp_expires_at_unix() {
+        println!(
+            "# Temporary config cache (expires {})\n",
+            format_expires_hint(expires_at)
+        );
+    } else {
+        println!("# Temporary config cache\n");
     }
 
-    let stored = StoredProfile::from_config(&config);
-    store.save_profile(name.clone(), stored, make_default)?;
-    println!("Profile '{}' saved to {}", name, store.path().display());
-    if make_default {
-        println!("'{}' marked as default.", name);
+    let config = profile.clone().into_config()?;
+    print_config(&config, "", credential_mode);
+    Ok(())
+}
+
+fn clear_temp(args: &TempClearArgs, ctx: &CliContext) -> Result<()> {
+    let mut store = open_profile_store(ctx)?;
+    if store.temp_profile().is_none() {
+        println!("No temporary config cache set.");
+        return Ok(());
     }
+
+    if !args.force {
+        ctx.ensure_interactive("clear temporary config cache")?;
+        let prompt = ctx.prompt();
+        let confirmed = task::block_in_place(|| {
+            Handle::current().block_on(prompt.confirm("Clear temporary config cache?", false))
+        })?;
+        if !confirmed {
+            println!("Operation cancelled.");
+            return Ok(());
+        }
+    }
+
+    let _ = store.clear_temp_profile()?;
+    println!("Temporary config cache cleared.");
     Ok(())
 }
 
@@ -313,27 +441,13 @@ fn print_provider_help(provider: StorageProvider, spec: ProviderSpec) {
 
 fn set_default_profile(args: &SetArgs, ctx: &CliContext) -> Result<()> {
     let mut store = open_profile_store(ctx)?;
-    let has_env_provider = env::var("STORAGE_PROVIDER").is_ok();
 
     if args.clear {
         store.set_default_profile(None)?;
         println!("✓ Default profile cleared");
-
-        if has_env_provider {
-            println!("ℹ Will now use STORAGE_PROVIDER environment variable");
-        } else {
-            println!(
-                "ℹ No default profile set. You'll need to provide --profile or set environment variables"
-            );
-        }
     } else if let Some(name) = &args.name {
         store.set_default_profile(Some(name.clone()))?;
         println!("✓ Default profile set to '{}'", name);
-
-        if has_env_provider {
-            println!("ℹ This profile will override STORAGE_PROVIDER environment variable");
-            println!("ℹ To temporarily use env vars, run: config set --clear");
-        }
     }
     Ok(())
 }

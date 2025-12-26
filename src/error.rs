@@ -152,6 +152,7 @@ pub enum Error {
         "No configuration resolves. Available profiles: {profiles}. Hint: run `storify config` or supply --profile"
     ))]
     NoConfiguration { profiles: String },
+    // Reserved for future extension.
 }
 
 impl From<opendal::Error> for Error {

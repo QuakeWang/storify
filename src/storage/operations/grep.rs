@@ -205,7 +205,7 @@ impl OpenDalGreper {
         // Optimize ASCII fast-path for case-insensitive checks without allocations
         let matched = if opts.ignore_case {
             if line.is_ascii() && opts.needle.is_ascii() {
-                // opts.needle 已在外层按 ignore_case 预小写，这里仅对 haystack 做无分配按位比较
+                // opts.needle is pre-lowercased; compare haystack in-place without allocations.
                 Self::ascii_contains_case_insensitive(line.as_bytes(), opts.needle.as_bytes())
             } else {
                 line.to_lowercase().contains(opts.needle)

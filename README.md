@@ -48,6 +48,18 @@ storify config list
 storify config set myprofile
 ```
 
+### Temporary Config Cache (TTL)
+
+Use an encrypted, TTL-based temporary cache when you don't want to create a named profile:
+
+```bash
+# Set a temporary config (default TTL 24h)
+storify config create --temp --provider cos --bucket my-bucket
+
+# Clear temporary config
+storify config temp clear
+```
+
 ### Using Environment Variables
 
 Set your storage provider and credentials:

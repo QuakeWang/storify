@@ -22,6 +22,7 @@ pub enum ConfigSource {
     ExplicitProfile,
     DefaultProfile,
     Environment,
+    TempCache,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -32,6 +33,7 @@ pub struct ResolvedConfig {
     pub available_profiles: Vec<String>,
     pub default_profile: Option<String>,
     pub source: Option<ConfigSource>,
+    pub temp_expires_at_unix: Option<u64>,
 }
 
 fn env_value(key: &str) -> Option<String> {
@@ -286,6 +288,17 @@ fn try_load_env(resolved: &mut ResolvedConfig) -> bool {
     }
 }
 
+fn try_load_temp(store: &ProfileStore, resolved: &mut ResolvedConfig) -> Result<bool> {
+    let Some(profile) = store.temp_profile() else {
+        return Ok(false);
+    };
+    let config = profile.clone().into_config()?;
+    resolved.storage = Some(config);
+    resolved.source = Some(ConfigSource::TempCache);
+    resolved.temp_expires_at_unix = store.temp_expires_at_unix();
+    Ok(true)
+}
+
 pub fn resolve(request: ConfigRequest) -> Result<ResolvedConfig> {
     let mut resolved = ResolvedConfig::default();
     let store = open_and_populate_store(&request, &mut resolved)?;
@@ -307,6 +320,16 @@ pub fn resolve(request: ConfigRequest) -> Result<ResolvedConfig> {
     }
 
     if let Some(store) = store.as_ref()
+        && try_load_temp(store, &mut resolved)?
+    {
+        return Ok(resolved);
+    }
+
+    if try_load_env(&mut resolved) {
+        return Ok(resolved);
+    }
+
+    if let Some(store) = store.as_ref()
         && let Some(default_name) = store.default_profile()
     {
         load_profile(
@@ -315,10 +338,6 @@ pub fn resolve(request: ConfigRequest) -> Result<ResolvedConfig> {
             ConfigSource::DefaultProfile,
             &mut resolved,
         )?;
-        return Ok(resolved);
-    }
-
-    if try_load_env(&mut resolved) {
         return Ok(resolved);
     }
 
