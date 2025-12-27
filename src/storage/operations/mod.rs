@@ -1,4 +1,5 @@
 // Storage operation traits and implementations
+pub mod append;
 pub mod cat;
 pub mod copy;
 pub mod delete;
@@ -18,6 +19,7 @@ pub mod upload;
 pub mod usage;
 
 // Re-export all operation traits - all are now implemented
+pub use append::{AppendOptions, Appender};
 pub use cat::Cater;
 pub use copy::Copier;
 pub use delete::Deleter;

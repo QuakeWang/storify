@@ -6,8 +6,10 @@ use opendal::Operator;
 pub mod constants;
 mod operations;
 mod utils;
+pub use self::operations::AppendOptions;
 pub use self::utils::OutputFormat;
 
+use self::operations::append::OpenDalAppender;
 use self::operations::cat::OpenDalFileReader;
 use self::operations::copy::OpenDalCopier;
 use self::operations::delete::OpenDalDeleter;
@@ -25,8 +27,8 @@ use self::operations::tree::OpenDalTreer;
 use self::operations::upload::OpenDalUploader;
 use self::operations::usage::OpenDalUsageCalculator;
 use self::operations::{
-    Cater, Copier, Deleter, Differ, Downloader, Greper, Header, Lister, Mkdirer, Mover, Stater,
-    Tailer, Toucher, Treer, Uploader, UsageCalculator,
+    Appender, Cater, Copier, Deleter, Differ, Downloader, Greper, Header, Lister, Mkdirer, Mover,
+    Stater, Tailer, Toucher, Treer, Uploader, UsageCalculator,
 };
 use crate::storage::utils::error::IntoStorifyError;
 use crate::wrap_err;
@@ -790,5 +792,47 @@ impl StorageClient {
             .buffer_unordered(concurrency)
             .try_for_each(|_| async { Ok(()) })
             .await
+    }
+
+    pub async fn append_from_local(
+        &self,
+        local_path: &str,
+        remote_path: &str,
+        opts: AppendOptions,
+    ) -> Result<()> {
+        log::debug!(
+            "append_from_local provider={:?} local_path={} remote_path={} no_create={} parents={}",
+            self.provider,
+            local_path,
+            remote_path,
+            opts.no_create,
+            opts.parents
+        );
+        let appender = OpenDalAppender::new(self.operator.clone());
+        wrap_err!(
+            appender
+                .append_from_local(local_path, remote_path, &opts)
+                .await,
+            AppendFailed {
+                path: remote_path.to_string()
+            }
+        )
+    }
+
+    pub async fn append_from_stdin(&self, remote_path: &str, opts: AppendOptions) -> Result<()> {
+        log::debug!(
+            "append_from_stdin provider={:?} remote_path={} no_create={} parents={}",
+            self.provider,
+            remote_path,
+            opts.no_create,
+            opts.parents
+        );
+        let appender = OpenDalAppender::new(self.operator.clone());
+        wrap_err!(
+            appender.append_from_stdin(remote_path, &opts).await,
+            AppendFailed {
+                path: remote_path.to_string()
+            }
+        )
     }
 }

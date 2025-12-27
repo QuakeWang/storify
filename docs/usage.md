@@ -41,6 +41,13 @@ This page lists the common Storify CLI commands with short, copy-pastable exampl
 - Ignore trailing whitespace: `storify diff -w left/file right/file`
 - Guard against large files and force: `storify diff --size-limit 1 -f left right`
 
+## Append
+- Append a local file: `storify append remote/path --src ./local.txt`
+- Append via stdin: `echo "line" | storify append remote/path --stdin`
+- Alias form (local first, remote second): `storify append ./local.txt remote/path`
+- Require existing file: add `-c/--no-create`
+- Auto-create parent directories (filesystem providers): add `-p/--parents`
+
 ## Options cheat sheet
 - `-R`: recursive (works with `ls`, `put`, `rm`, `find`)
 - `-L`: long/detailed listing
