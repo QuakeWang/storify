@@ -94,9 +94,33 @@ impl OpenDalDownloader {
 
         let metadata = self.operator.stat(remote_file_path).await?;
         let file_size = metadata.content_length();
+        let remote_etag = metadata.etag().map(str::to_string);
 
         let mut offset = match fs::metadata(local_file_path).await {
-            Ok(meta) if meta.is_file() => meta.len().min(file_size),
+            Ok(meta) if meta.is_file() => {
+                let candidate = meta.len().min(file_size);
+                // Validate resume: check that the remote object hasn't changed
+                // since we started downloading by comparing ETags.
+                if candidate > 0 {
+                    let etag_path = local_file_path.with_extension("etag");
+                    let saved_etag = fs::read_to_string(&etag_path).await.ok();
+                    match (&saved_etag, &remote_etag) {
+                        (Some(saved), Some(remote)) if saved.trim() == remote.trim() => candidate,
+                        (Some(_), Some(_)) => {
+                            // ETag mismatch — remote object changed, restart
+                            log::warn!(
+                                "Remote object changed since partial download, restarting: {}",
+                                remote_file_path
+                            );
+                            let _ = fs::remove_file(&etag_path).await;
+                            0u64
+                        }
+                        _ => candidate, // No ETag available — best effort resume
+                    }
+                } else {
+                    0u64
+                }
+            }
             _ => 0u64,
         };
 
@@ -106,6 +130,12 @@ impl OpenDalDownloader {
                 local_file_path.display()
             );
             return Ok(());
+        }
+
+        // Persist remote ETag for resume validation on future runs
+        if let Some(ref etag) = remote_etag {
+            let etag_path = local_file_path.with_extension("etag");
+            let _ = fs::write(&etag_path, etag.as_bytes()).await;
         }
 
         let mut file = if offset > 0 {
@@ -157,6 +187,11 @@ impl OpenDalDownloader {
         }
 
         file.flush().await?;
+
+        // Clean up ETag sidecar after successful download
+        let etag_path = local_file_path.with_extension("etag");
+        let _ = fs::remove_file(&etag_path).await;
+
         println!(
             "\nDownloaded: {remote_file_path} → {} ({total_bytes} bytes)",
             local_file_path.display()

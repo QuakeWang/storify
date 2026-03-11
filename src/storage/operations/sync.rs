@@ -191,8 +191,14 @@ impl OpenDalSyncer {
             HashMap::new()
         };
 
-        // 3. Diff (source = remote, target = local; no lazy MD5 needed — remote has ETags)
-        let plan = diff_entries(&remote_entries, &local_entries, opts.delete, None).await;
+        // 3. Diff (source = remote, target = local; provide local_root for lazy MD5)
+        let plan = diff_entries(
+            &remote_entries,
+            &local_entries,
+            opts.delete,
+            Some(local_root),
+        )
+        .await;
 
         if opts.dry_run {
             return Self::print_dry_run(&plan);
@@ -246,6 +252,7 @@ impl OpenDalSyncer {
         DF: Fn(Operator, String) -> DFut,
         DFut: std::future::Future<Output = Result<()>> + Send,
     {
+        let concurrency = concurrency.max(1);
         let mut report = SyncReport::default();
 
         // Separate transfers from other actions to process concurrently
@@ -426,15 +433,19 @@ async fn diff_entries(
 
 /// Determine whether a file needs to be synced.
 ///
-/// For upload: source has no ETag (local file), target has ETag (remote).
-/// When sizes match, we lazily compute the local MD5 and compare.
+/// Handles both directions:
+/// - **Upload**: source=local (no ETag), target=remote (has ETag) → compute local MD5
+/// - **Download**: source=remote (has ETag), target=local (no ETag) → compute local MD5
+/// - **Both have ETags**: direct ETag comparison
+///
+/// When sizes differ, always transfer without computing MD5.
 async fn determine_action(
     src: &EntryMeta,
     tgt: &EntryMeta,
     rel_path: &str,
     local_root: Option<&Path>,
 ) -> SyncAction {
-    // Fast path: if both have ETags (download sync), compare directly
+    // Fast path: if both have ETags, compare directly
     if let (Some(se), Some(te)) = (&src.etag, &tgt.etag) {
         return if normalize_etag(se) == normalize_etag(te) {
             SyncAction::Skip
@@ -448,16 +459,19 @@ async fn determine_action(
         return SyncAction::Update;
     }
 
-    // Size matches but no ETag on source (upload sync, local file).
-    // Lazy MD5: compute only when needed.
-    if let (None, Some(root), Some(remote_etag)) = (&src.etag, local_root, &tgt.etag) {
-        let local_path = root.join(rel_path);
-        if let Ok(local_md5) = compute_file_md5(&local_path).await {
-            return if local_md5 == normalize_etag(remote_etag) {
-                SyncAction::Skip
-            } else {
-                SyncAction::Update
-            };
+    // Size matches — exactly one side has an ETag. Compute local MD5 to compare.
+    if let Some(root) = local_root {
+        // Figure out which side has the ETag to compare against
+        let remote_etag = src.etag.as_deref().or(tgt.etag.as_deref());
+        if let Some(etag) = remote_etag {
+            let local_path = root.join(rel_path);
+            if let Ok(local_md5) = compute_file_md5(&local_path).await {
+                return if local_md5 == normalize_etag(etag) {
+                    SyncAction::Skip
+                } else {
+                    SyncAction::Update
+                };
+            }
         }
     }
 
