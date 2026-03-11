@@ -76,7 +76,9 @@ impl PromptSession {
             ctx.ensure_interactive("prompt required")?;
             self.prompt = Some(*ctx.prompt());
         }
-        Ok(self.prompt.unwrap())
+        Ok(self
+            .prompt
+            .expect("prompt must be set after interactive check"))
     }
 }
 
@@ -107,7 +109,10 @@ fn show_command(args: &ShowArgs, ctx: &CliContext) -> Result<()> {
                     message: "No default profile configured.".into(),
                 })?
         } else {
-            args.profile.as_ref().unwrap().as_str()
+            args.profile
+                .as_ref()
+                .expect("profile option guarded by ArgGroup")
+                .as_str()
         };
         let config = store.get_profile(profile_name)?.into_config()?;
         let hint = format!("profile '{}'", profile_name);
@@ -500,7 +505,7 @@ fn list_profiles(args: &ListArgs, ctx: &CliContext) -> Result<()> {
             }
         }
 
-        if name != names.last().unwrap() {
+        if name != names.last().expect("names is non-empty") {
             println!();
         }
     }

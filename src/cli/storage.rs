@@ -296,6 +296,33 @@ pub struct TouchArgs {
     pub parents: bool,
 }
 
+#[derive(ClapArgs, Debug, Clone)]
+pub struct SyncArgs {
+    /// Source path (local directory for upload, remote path for download)
+    #[arg(value_name = "SOURCE", value_parser = parse_validated_path)]
+    pub source: String,
+
+    /// Target path (remote path for upload, local directory for download)
+    #[arg(value_name = "TARGET", value_parser = parse_validated_path)]
+    pub target: String,
+
+    /// Transfer direction: upload (local→remote) or download (remote→local)
+    #[arg(long, default_value = "upload")]
+    pub direction: String,
+
+    /// Show what would be done without making changes
+    #[arg(long)]
+    pub dry_run: bool,
+
+    /// Delete target files not present in source
+    #[arg(long)]
+    pub delete: bool,
+
+    /// Number of concurrent transfers
+    #[arg(long, default_value_t = 8)]
+    pub concurrency: usize,
+}
+
 pub async fn execute(command: &Command, ctx: &CliContext) -> Result<()> {
     let config = ctx.storage_config()?;
     let client = StorageClient::new(config.clone()).await?;
@@ -449,6 +476,18 @@ pub async fn execute(command: &Command, ctx: &CliContext) -> Result<()> {
                     touch_args.no_create,
                     touch_args.truncate,
                     touch_args.parents,
+                )
+                .await?;
+        }
+        Command::Sync(sync_args) => {
+            client
+                .sync_files(
+                    &sync_args.source,
+                    &sync_args.target,
+                    &sync_args.direction,
+                    sync_args.dry_run,
+                    sync_args.delete,
+                    sync_args.concurrency,
                 )
                 .await?;
         }

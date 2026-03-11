@@ -45,7 +45,7 @@ impl OpenDalUploader {
         let mut writer = self.operator.writer(remote_path).await?;
 
         let step_bytes = DEFAULT_BUFFER_SIZE as u64 * PROGRESS_UPDATE_INTERVAL;
-        let reporter = ConsoleProgressReporter::new(
+        let mut reporter = ConsoleProgressReporter::new(
             format!("Uploading {}", local_path.display()),
             Some(file_size),
             step_bytes,

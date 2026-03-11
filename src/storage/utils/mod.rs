@@ -2,6 +2,7 @@
 pub mod error;
 pub mod path;
 pub mod progress;
+pub mod retry;
 pub mod size;
 
 /// Output format for CLI commands that can render machine-readable results

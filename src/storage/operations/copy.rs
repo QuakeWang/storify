@@ -96,7 +96,7 @@ impl OpenDalCopier {
         let mut total_bytes = 0u64;
         let mut offset = 0u64;
 
-        let reporter = ConsoleProgressReporter::new(
+        let mut reporter = ConsoleProgressReporter::new(
             format!("Copying {src_path}"),
             Some(file_size),
             DEFAULT_CHUNK_SIZE as u64,
