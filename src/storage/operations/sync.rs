@@ -521,7 +521,7 @@ async fn walk_local_dir(root: &Path) -> Result<HashMap<String, EntryMeta>> {
                         path: path.display().to_string(),
                     })?
                     .to_string_lossy()
-                    .to_string();
+                    .replace(std::path::MAIN_SEPARATOR, "/");
 
                 entries.insert(
                     rel_path,
@@ -598,6 +598,15 @@ async fn upload_file(op: &Operator, local_path: &Path, remote_path: &str) -> Res
 async fn download_file(op: &Operator, remote_path: &str, local_path: &Path) -> Result<u64> {
     if let Some(parent) = local_path.parent() {
         fs::create_dir_all(parent).await?;
+    }
+
+    // Reject symlink targets to prevent overwriting arbitrary files
+    if let Ok(meta) = fs::symlink_metadata(local_path).await
+        && meta.file_type().is_symlink()
+    {
+        return Err(Error::InvalidArgument {
+            message: format!("target path is a symbolic link: {}", local_path.display()),
+        });
     }
 
     let metadata = op.stat(remote_path).await?;

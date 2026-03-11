@@ -92,6 +92,18 @@ impl OpenDalDownloader {
             fs::create_dir_all(parent).await?;
         }
 
+        // Reject symlink targets to prevent overwriting arbitrary files
+        if let Ok(meta) = fs::symlink_metadata(local_file_path).await
+            && meta.file_type().is_symlink()
+        {
+            return Err(Error::InvalidArgument {
+                message: format!(
+                    "target path is a symbolic link: {}",
+                    local_file_path.display()
+                ),
+            });
+        }
+
         let metadata = self.operator.stat(remote_file_path).await?;
         let file_size = metadata.content_length();
         let remote_etag = metadata.etag().map(str::to_string);
