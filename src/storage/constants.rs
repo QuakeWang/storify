@@ -1,6 +1,7 @@
 // Buffer related constants
 pub const DEFAULT_BUFFER_SIZE: usize = 8192;
 pub const DEFAULT_CHUNK_SIZE: usize = 1024 * 1024;
+pub const SYNC_CHUNK_SIZE: u64 = 8 * 1024 * 1024;
 
 // Progress related constants
 // Controls how often progress is printed (in multiples of buffer size)

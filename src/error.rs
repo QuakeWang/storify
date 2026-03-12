@@ -148,6 +148,9 @@ pub enum Error {
     #[snafu(display("Profile '{name}' not found"))]
     ProfileNotFound { name: String },
 
+    #[snafu(display("Sync failed for '{path}': {source}"))]
+    SyncFailed { path: String, source: Box<Error> },
+
     #[snafu(display(
         "No configuration resolves. Available profiles: {profiles}. Hint: run `storify config` or supply --profile"
     ))]

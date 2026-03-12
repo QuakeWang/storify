@@ -1,9 +1,14 @@
 use crate::error::{Error, Result};
+use crate::storage::constants::DEFAULT_CHUNK_SIZE;
 use crate::storage::utils::path::get_root_relative_path;
+use crate::storage::utils::progress::ConsoleProgressReporter;
+use crate::storage::utils::retry::read_range_with_retry;
 use futures::stream::TryStreamExt;
 use opendal::{EntryMode, Operator};
 use std::path::{Path, PathBuf};
 use tokio::fs;
+use tokio::fs::OpenOptions;
+use tokio::io::AsyncWriteExt;
 
 /// Trait for downloading files and directories from storage.
 pub trait Downloader {
@@ -28,14 +33,209 @@ impl OpenDalDownloader {
     pub fn new(operator: Operator) -> Self {
         Self { operator }
     }
+
+    async fn is_directory(&self, path: &str) -> bool {
+        match self.operator.stat(path).await.ok().map(|m| m.mode()) {
+            Some(EntryMode::DIR) => true,
+            Some(_) => false,
+            None => {
+                let probe = if path.ends_with('/') {
+                    path.to_string()
+                } else {
+                    format!("{path}/")
+                };
+                self.operator
+                    .list_with(&probe)
+                    .limit(1)
+                    .await
+                    .map(|entries| !entries.is_empty())
+                    .unwrap_or(false)
+            }
+        }
+    }
+
+    async fn resolve_local_file_path(
+        &self,
+        remote_file_path: &str,
+        local_path: &str,
+    ) -> Result<PathBuf> {
+        let local = Path::new(local_path);
+
+        let local_is_dir = if local_path.ends_with('/') {
+            true
+        } else if local.extension().is_some() {
+            false
+        } else {
+            match fs::metadata(local).await {
+                Ok(meta) => meta.is_dir(),
+                Err(_) => true,
+            }
+        };
+
+        if local_is_dir {
+            let file_name = Path::new(remote_file_path)
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+            Ok(local.join(file_name))
+        } else {
+            Ok(local.to_path_buf())
+        }
+    }
+
+    async fn download_single_file(
+        &self,
+        remote_file_path: &str,
+        local_file_path: &Path,
+    ) -> Result<()> {
+        if let Some(parent) = local_file_path.parent() {
+            fs::create_dir_all(parent).await?;
+        }
+
+        // Reject symlink targets to prevent overwriting arbitrary files
+        if let Ok(meta) = fs::symlink_metadata(local_file_path).await
+            && meta.file_type().is_symlink()
+        {
+            return Err(Error::InvalidArgument {
+                message: format!(
+                    "target path is a symbolic link: {}",
+                    local_file_path.display()
+                ),
+            });
+        }
+
+        let metadata = self.operator.stat(remote_file_path).await?;
+        let file_size = metadata.content_length();
+        let remote_etag = metadata.etag().map(str::to_string);
+
+        let mut offset = match fs::metadata(local_file_path).await {
+            Ok(meta) if meta.is_file() => {
+                let candidate = meta.len().min(file_size);
+                // Validate resume: check that the remote object hasn't changed
+                // since we started downloading by comparing ETags.
+                if candidate > 0 {
+                    let etag_path = local_file_path.with_extension("etag");
+                    let saved_etag = fs::read_to_string(&etag_path).await.ok();
+                    match (&saved_etag, &remote_etag) {
+                        (Some(saved), Some(remote)) if saved.trim() == remote.trim() => candidate,
+                        (Some(_), Some(_)) => {
+                            // ETag mismatch — remote object changed, restart
+                            log::warn!(
+                                "Remote object changed since partial download, restarting: {}",
+                                remote_file_path
+                            );
+                            let _ = fs::remove_file(&etag_path).await;
+                            0u64
+                        }
+                        _ => candidate, // No ETag available — best effort resume
+                    }
+                } else {
+                    0u64
+                }
+            }
+            _ => 0u64,
+        };
+
+        if offset == file_size && file_size > 0 {
+            println!(
+                "Skipped (already downloaded): {remote_file_path} → {} ({file_size} bytes)",
+                local_file_path.display()
+            );
+            return Ok(());
+        }
+
+        // Persist remote ETag for resume validation on future runs
+        if let Some(ref etag) = remote_etag {
+            let etag_path = local_file_path.with_extension("etag");
+            let _ = fs::write(&etag_path, etag.as_bytes()).await;
+        }
+
+        let mut file = if offset > 0 {
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(local_file_path)
+                .await?
+        } else {
+            OpenOptions::new()
+                .create(true)
+                .truncate(true)
+                .write(true)
+                .open(local_file_path)
+                .await?
+        };
+
+        let mut total_bytes = offset;
+
+        let mut reporter = ConsoleProgressReporter::new(
+            format!("Downloading {remote_file_path}"),
+            Some(file_size),
+            DEFAULT_CHUNK_SIZE as u64,
+        );
+
+        loop {
+            if offset >= file_size {
+                break;
+            }
+
+            let chunk_size = std::cmp::min(DEFAULT_CHUNK_SIZE as u64, file_size - offset);
+            let data = read_range_with_retry(
+                &self.operator,
+                remote_file_path,
+                offset..offset + chunk_size,
+            )
+            .await?;
+            let data_len = data.len();
+            if data_len == 0 {
+                break;
+            }
+
+            let bytes = data.to_bytes();
+            file.write_all(&bytes).await?;
+            total_bytes += data_len as u64;
+            offset += data_len as u64;
+
+            reporter.maybe_report(total_bytes);
+        }
+
+        file.flush().await?;
+
+        // Clean up ETag sidecar after successful download
+        let etag_path = local_file_path.with_extension("etag");
+        let _ = fs::remove_file(&etag_path).await;
+
+        println!(
+            "\nDownloaded: {remote_file_path} → {} ({total_bytes} bytes)",
+            local_file_path.display()
+        );
+        Ok(())
+    }
 }
 
 impl Downloader for OpenDalDownloader {
     async fn download(&self, remote_path: &str, local_path: &str) -> Result<()> {
-        if !self.operator.exists(remote_path).await? {
-            return Err(Error::PathNotFound {
-                path: PathBuf::from(remote_path),
-            });
+        let remote_path = if remote_path == "/" {
+            ""
+        } else {
+            remote_path.trim_start_matches('/')
+        };
+
+        if !self.is_directory(remote_path).await {
+            if let Err(e) = self.operator.stat(remote_path).await {
+                if e.kind() == opendal::ErrorKind::NotFound {
+                    return Err(Error::PathNotFound {
+                        path: PathBuf::from(remote_path),
+                    });
+                }
+                return Err(e.into());
+            }
+
+            let local_file_path = self
+                .resolve_local_file_path(remote_path, local_path)
+                .await?;
+            return self
+                .download_single_file(remote_path, &local_file_path)
+                .await;
         }
 
         let lister = self
@@ -45,7 +245,9 @@ impl Downloader for OpenDalDownloader {
             .await?;
 
         let mut stream = lister;
+        let mut saw_any = false;
         while let Some(entry) = stream.try_next().await? {
+            saw_any = true;
             let meta = entry.metadata();
             let remote_file_path = entry.path();
             // Skip malformed keys that contain double slashes which may be normalized differently at read time
@@ -69,30 +271,29 @@ impl Downloader for OpenDalDownloader {
             if meta.mode() == EntryMode::DIR {
                 fs::create_dir_all(&local_file_path).await?;
             } else {
-                if let Some(parent) = local_file_path.parent() {
-                    fs::create_dir_all(parent).await?;
-                }
-                match self.operator.read(remote_file_path).await {
-                    Ok(data) => {
-                        fs::write(&local_file_path, data.to_vec()).await?;
-                        println!(
-                            "Downloaded: {remote_file_path} → {}",
-                            local_file_path.display()
+                match self
+                    .download_single_file(remote_file_path, &local_file_path)
+                    .await
+                {
+                    Ok(()) => {}
+                    Err(Error::OpenDal { source })
+                        if source.kind() == opendal::ErrorKind::NotFound =>
+                    {
+                        log::warn!(
+                            "Skip not found at read (likely normalized key): {}",
+                            remote_file_path
                         );
+                        continue;
                     }
-                    Err(e) => {
-                        // Gracefully skip objects that cannot be found due to key normalization issues
-                        if e.kind() == opendal::ErrorKind::NotFound {
-                            log::warn!(
-                                "Skip not found at read (likely normalized key): {}",
-                                remote_file_path
-                            );
-                            continue;
-                        }
-                        return Err(e.into());
-                    }
+                    Err(err) => return Err(err),
                 }
             }
+        }
+
+        if !saw_any {
+            return Err(Error::PathNotFound {
+                path: PathBuf::from(remote_path),
+            });
         }
 
         Ok(())

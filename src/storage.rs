@@ -19,6 +19,7 @@ use self::operations::head::OpenDalHeadReader;
 use self::operations::list::OpenDalLister;
 use self::operations::mkdir::OpenDalMkdirer;
 use self::operations::mv::OpenDalMover;
+use self::operations::sync::{OpenDalSyncer, SyncDirection, SyncOptions};
 use self::operations::tail::OpenDalTailReader;
 use self::operations::touch::OpenDalToucher;
 use self::operations::tree::OpenDalTreer;
@@ -26,7 +27,7 @@ use self::operations::upload::OpenDalUploader;
 use self::operations::usage::OpenDalUsageCalculator;
 use self::operations::{
     Cater, Copier, Deleter, Differ, Downloader, Greper, Header, Lister, Mkdirer, Mover, Stater,
-    Tailer, Toucher, Treer, Uploader, UsageCalculator,
+    Syncer, Tailer, Toucher, Treer, Uploader, UsageCalculator,
 };
 use crate::storage::utils::error::IntoStorifyError;
 use crate::wrap_err;
@@ -445,21 +446,7 @@ impl StorageClient {
         let meta = stater.stat(path).await?;
 
         match format {
-            OutputFormat::Human => {
-                println!("path={}", meta.path);
-                println!("type={}", meta.entry_type);
-                println!("size={}", meta.size);
-                if let Some(t) = meta.last_modified {
-                    println!("last_modified={}", t);
-                }
-                if let Some(etag) = meta.etag {
-                    println!("etag=\"{}\"", etag);
-                }
-                if let Some(ct) = meta.content_type {
-                    println!("content_type={}", ct);
-                }
-            }
-            OutputFormat::Raw => {
+            OutputFormat::Human | OutputFormat::Raw => {
                 println!("path={}", meta.path);
                 println!("type={}", meta.entry_type);
                 println!("size={}", meta.size);
@@ -542,56 +529,78 @@ impl StorageClient {
             recursive
         );
 
-        // When recursive is requested, avoid failing on NotFound for virtual prefixes (S3/OSS).
         if recursive {
-            match self.operator.stat(path).await {
-                Ok(meta) => {
-                    if meta.mode().is_file() {
-                        return self
-                            .grep_file(path, pattern, ignore_case, line_number)
-                            .await;
-                    }
-                    // If it's a directory or other type, fall through to recursive listing.
-                }
-                Err(e) => {
-                    // NotFound likely indicates a virtual prefix; proceed to listing.
-                    if e.kind() != opendal::ErrorKind::NotFound {
-                        return Err(Error::GrepFailed {
-                            path: path.to_string(),
-                            source: Box::new(e.into()),
-                        });
-                    }
+            self.grep_recursive(path, pattern, ignore_case, line_number)
+                .await
+        } else {
+            self.grep_single(path, pattern, ignore_case, line_number)
+                .await
+        }
+    }
+
+    /// Recursively grep all files under `path`.
+    ///
+    /// Tolerates `NotFound` on stat since S3/OSS virtual prefixes may not
+    /// have explicit directory objects.
+    async fn grep_recursive(
+        &self,
+        path: &str,
+        pattern: &str,
+        ignore_case: bool,
+        line_number: bool,
+    ) -> Result<()> {
+        match self.operator.stat(path).await {
+            Ok(meta) => {
+                if meta.mode().is_file() {
+                    return self
+                        .grep_file(path, pattern, ignore_case, line_number)
+                        .await;
                 }
             }
-
-            let lister = wrap_err!(
-                self.operator.lister_with(path).recursive(true).await,
-                ListDirectoryFailed {
-                    path: path.to_string()
-                }
-            )?;
-
-            futures::pin_mut!(lister);
-            while let Some(entry) =
-                lister
-                    .try_next()
-                    .await
-                    .map_err(|e| Error::ListDirectoryFailed {
+            Err(e) => {
+                if e.kind() != opendal::ErrorKind::NotFound {
+                    return Err(Error::GrepFailed {
                         path: path.to_string(),
-                        source: Box::new(e.into_error()),
-                    })?
-            {
-                if entry.metadata().mode().is_file() {
-                    let greper = OpenDalGreper::new(self.operator.clone());
-                    greper
-                        .grep(entry.path(), pattern, ignore_case, line_number, true)
-                        .await?;
+                        source: Box::new(e.into()),
+                    });
                 }
             }
-            return Ok(());
         }
 
-        // Non-recursive: require a real file; directories must use -R.
+        let lister = wrap_err!(
+            self.operator.lister_with(path).recursive(true).await,
+            ListDirectoryFailed {
+                path: path.to_string()
+            }
+        )?;
+
+        futures::pin_mut!(lister);
+        while let Some(entry) = lister
+            .try_next()
+            .await
+            .map_err(|e| Error::ListDirectoryFailed {
+                path: path.to_string(),
+                source: Box::new(e.into_error()),
+            })?
+        {
+            if entry.metadata().mode().is_file() {
+                let greper = OpenDalGreper::new(self.operator.clone());
+                greper
+                    .grep(entry.path(), pattern, ignore_case, line_number, true)
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Grep a single file; fail if `path` is a directory (suggest `-R`).
+    async fn grep_single(
+        &self,
+        path: &str,
+        pattern: &str,
+        ignore_case: bool,
+        line_number: bool,
+    ) -> Result<()> {
         let meta = self.operator.stat(path).await.map_err(|e| {
             if e.kind() == opendal::ErrorKind::NotFound {
                 Error::PathNotFound {
@@ -790,5 +799,39 @@ impl StorageClient {
             .buffer_unordered(concurrency)
             .try_for_each(|_| async { Ok(()) })
             .await
+    }
+
+    pub async fn sync_files(
+        &self,
+        source: &str,
+        target: &str,
+        direction: &str,
+        dry_run: bool,
+        delete: bool,
+        concurrency: usize,
+    ) -> Result<()> {
+        log::debug!(
+            "sync_files provider={:?} source={} target={} direction={} dry_run={} delete={} concurrency={}",
+            self.provider,
+            source,
+            target,
+            direction,
+            dry_run,
+            delete,
+            concurrency
+        );
+
+        let direction: SyncDirection = direction.parse()?;
+        let opts = SyncOptions {
+            direction,
+            dry_run,
+            delete,
+            concurrency,
+        };
+
+        let syncer = OpenDalSyncer::new(self.operator.clone());
+        syncer.sync(source, target, &opts).await?;
+
+        Ok(())
     }
 }

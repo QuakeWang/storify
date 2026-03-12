@@ -1336,6 +1336,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "md5"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae960838283323069879657ca3de837e9f7bbb4c7bf6ea7f1b290d5e9476d2e0"
+
+[[package]]
 name = "memchr"
 version = "2.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1609,7 +1615,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.5.9",
+ "socket2 0.6.0",
  "thiserror",
  "tokio",
  "tracing",
@@ -1646,9 +1652,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.9",
+ "socket2 0.6.0",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2183,6 +2189,7 @@ dependencies = [
  "globset",
  "libtest-mimic",
  "log",
+ "md5",
  "memchr",
  "opendal",
  "predicates",
@@ -2196,6 +2203,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml",
+ "tracing-log",
  "tracing-subscriber",
  "uuid",
  "zeroize",

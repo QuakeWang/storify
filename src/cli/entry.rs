@@ -91,6 +91,8 @@ pub enum Command {
     Diff(DiffArgs),
     /// Create empty files or update metadata (best-effort)
     Touch(TouchArgs),
+    /// Synchronize files between local and remote storage
+    Sync(super::storage::SyncArgs),
 }
 
 #[derive(Subcommand, Debug, Clone)]

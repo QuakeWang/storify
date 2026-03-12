@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 register_behavior_tests!(
     test_download_existing_file_to_directory,
+    test_download_existing_file_to_file_path,
     test_download_directory_recursive,
     test_download_non_existent_file,
 );
@@ -67,6 +68,25 @@ async fn test_download_existing_file_to_directory(client: StorageClient) -> Resu
     assert_eq!(staged_file.content, actual_content);
 
     let _ = fs::remove_dir_all(&local_dir).await;
+    Ok(())
+}
+
+async fn test_download_existing_file_to_file_path(client: StorageClient) -> Result<()> {
+    let staged_file = stage_remote_file(&client).await?;
+    let local_file = std::env::temp_dir().join(format!("storify-dl-file-{}.bin", Uuid::new_v4()));
+
+    storify_cmd()
+        .arg("get")
+        .arg(&staged_file.remote_path)
+        .arg(&local_file)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Downloaded:"));
+
+    let actual_content = fs::read(&local_file).await?;
+    assert_eq!(staged_file.content, actual_content);
+
+    let _ = fs::remove_file(&local_file).await;
     Ok(())
 }
 
